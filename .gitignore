@@ -1,0 +1,13 @@
+# 보안: API 키 절대 커밋 금지
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 생성물 (선택적으로 커밋 — 데모용으로는 1개 남겨두면 좋음)
+outputs/*.md
+outputs/logs/
+!outputs/.gitkeep

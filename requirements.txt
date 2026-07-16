@@ -1,0 +1,14 @@
+# Shopify Ops Agent dependencies
+# Matches the daily-briefing-agent stack (crewai + anthropic) for consistency.
+
+crewai==1.15.2
+anthropic==0.105.2        # CrewAI Anthropic provider - required or LLM init fails
+requests>=2.32            # Shopify Admin GraphQL API calls
+python-dotenv==1.2.2      # matched to crewai's requirement (>=1.2.2,<2)
+pydantic==2.12.5
+
+# [Phase 2] streamlit==1.58.0   # web UI + human-approval flow for write actions
+# [Phase 2] agentops==0.4.21    # observability dashboard + tracing
+
+# Dev/test only (not needed at runtime)
+pytest>=8.0
