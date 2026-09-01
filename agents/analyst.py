@@ -4,7 +4,7 @@ Analyst Agent - reads Shopify catalog + order data and flags issues.
 Single responsibility: read-only analysis, no writes.
 Input: (nothing - pulls live from Shopify)  ->  Output: AnalysisReport
 
-Phase 2 will add an Executor agent (separate file) that takes this agent's
+Phase 2 will add a deterministic Executor (executor.py, code, not an LLM agent) that takes this agent's
 flagged_products as input and applies approved changes via write tools.
 """
 

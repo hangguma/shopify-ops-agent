@@ -4,7 +4,7 @@ Crew assembly - the core of the agent system.
 Why separate this from main.py?
 - crew.py is "the agent system itself"; main.py is "how to run it".
 - Phase 2 (Streamlit UI with an approval step) imports build_crew as-is and
-  inserts the human-approval gate between this report and an executor crew.
+  inserts the human-approval gate between this report and a deterministic executor (executor.py, code, not an LLM crew).
 """
 
 from crewai import Crew, Process

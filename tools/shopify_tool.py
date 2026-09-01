@@ -7,7 +7,7 @@ Why this design?
   folded into the products tool (variant.inventoryQuantity) rather than a
   third tool, since Shopify already returns it in the same query - a
   separate "get_inventory" call would just repeat this one.
-- Phase 2 (write tools: update_price, update_inventory) will live in this
+- Phase 2 (write tool: update_inventory; price/discount cut for cost of error) will live in this
   same module, sharing _graphql_request.
 - Auth uses the client credentials grant (Dev Dashboard apps have no static
   admin token). Tokens expire after ~24h, so _get_access_token caches the

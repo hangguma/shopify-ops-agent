@@ -5,7 +5,7 @@ Why this design?
 - Agent is "who"; Task is "what to do" - kept separate so the analyst can be
   reused for different tasks later.
 - output_pydantic enforces the I/O contract (AnalysisReport), so Phase 2's
-  executor / Streamlit UI can consume this without re-parsing free text.
+  deterministic executor / Streamlit UI can consume this without re-parsing free text.
 - The date is injected by code (not guessed by the LLM) - same principle as
   daily-briefing-agent's write task.
 """
