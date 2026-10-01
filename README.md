@@ -10,10 +10,16 @@ Background and portfolio strategy live in life-os:
 
 ## Phases
 
-- **Phase 1 (current)** — Read-only analyst agent: pull inventory/orders →
+- **Phase 1 (done)** — Read-only analyst agent: pull inventory/orders →
   flag at-risk and underperforming products → markdown report
-- **Phase 2** — Executor agent (write actions) + approval flow + audit log +
-  Streamlit dashboard
+- **Phase 2A (current)** — Storefront setup: a Builder agent turns a brand
+  brief into a `StorePlan` (collections, products, pages, main menu) → a human
+  approves item by item → a deterministic Executor applies only approved items
+  to the Online Store, with dry run by default and a JSONL audit log
+- **Phase 2B** — Headless storefront (Hydrogen / Next.js on the Storefront API)
+- **Phase 2C** — Ops executor (price/inventory write actions from the
+  analyst's report) + Streamlit approval UI on top of the same plan → approve
+  → apply pipeline
 - **Phase 3 (stretch)** — Scheduled monitoring + alerts
 
 ## Setup
@@ -45,25 +51,73 @@ Background and portfolio strategy live in life-os:
    ```
    Output prints to console and saves to `outputs/ops_report_<date>.md`.
 
+## Store setup (Phase 2A)
+
+The LLM proposes; a human approves; plain code writes.
+
+```
+brand brief ──► Builder agent ──► StorePlan JSON ──► review (human) ──► Executor ──► Shopify
+               (CrewAI, read-only)  outputs/plans/    approve per item   dry run first   + audit log
+```
+
+1. Add write scopes to the Dev Dashboard app (Versions → new version →
+   Release → reinstall on the dev store):
+   `write_products`, `write_content`, `read_online_store_navigation`,
+   `write_online_store_navigation`, `read_publications`, `write_publications`
+2. Write a brand brief (start from `briefs/example_brief.md`)
+3. Run the three steps:
+   ```
+   python setup_store.py plan   --brief briefs/example_brief.md
+   python setup_store.py review outputs/plans/store_plan_<date>.json      # y/N per item, or --approve-all
+   python setup_store.py apply  outputs/plans/store_plan_<date>.json      # dry run: reads only
+   python setup_store.py apply  outputs/plans/store_plan_<date>.json --execute
+   ```
+
+Design choices:
+- **Builder has no write tools.** It can read the catalog to avoid
+  duplicates, and its output is a `StorePlan` (Pydantic) with every
+  `approved` flag forced to `false`.
+- **The plan is a file.** You can read, diff and hand-edit it before review.
+  `reference_problems()` refuses plans with dangling references (a product
+  pointing at a collection that is not in the plan, a menu link to a missing
+  page).
+- **Executor is deterministic code, not an agent.** Order: collections →
+  products → pages → menu. Collections and pages are looked up by handle
+  before creating; products use `productSet`'s handle upsert. Re-running a
+  plan creates no duplicates.
+- **Dry run by default.** `apply` without `--execute` still reads the store,
+  so it reports which handles already exist, but never writes.
+- **Every action is logged** to `outputs/audit_log.jsonl` (created / exists /
+  upserted / published / skipped / error). One failed item does not abort the
+  run.
+
+Scope of 2A: single-variant products, manual collections, Online Store pages,
+replacing the items of the theme's `main-menu`. No images, no theme edits.
+
 ## Structure
 
 ```
 config/      settings + logging (settings.py, logging_setup.py)
-models/      I/O contracts between agents (Pydantic schemas)
-tools/       Shopify Admin API wrapped as CrewAI tools (currently read-only)
-agents/      agent definitions (currently analyst only)
-tasks/       task definitions assigned to agents
-crew.py      assembles agents + tasks into a Crew
-main.py      CLI entry point (replaced by app.py / Streamlit in Phase 2)
+models/      I/O contracts between agents (Pydantic): schemas.py (Phase 1),
+             store_plan.py (Phase 2A)
+tools/       shopify_tool.py: read tools for agents (CrewAI)
+             shopify_write_tool.py: write functions, called only by the Executor
+agents/      analyst.py (Phase 1), builder.py (Phase 2A)
+tasks/       tasks.py (Phase 1), store_setup.py (Phase 2A)
+executor/    store_executor.py: applies approved StorePlan items
+briefs/      brand briefs for the Builder
+crew.py      Phase 1 analysis crew
+crew_setup.py  Phase 2A store setup crew
+main.py      Phase 1 CLI
+setup_store.py Phase 2A CLI (plan / review / apply)
 ```
 
-Phase 2 adds write tools (e.g. `update_price`) to `tools/` and an
-`executor.py` to `agents/`. The existing read-only analysis logic is reused
-as-is.
+The read-only analysis path (`main.py`, `crew.py`, `agents/analyst.py`) is
+unchanged by Phase 2A.
 
 ## Testing
 
-- `pytest -v` runs 16 unit tests (mocked, no live store needed) — see
+- `pytest -v` runs 61 unit tests (mocked, no live store needed) — see
   [docs/AUTOMATED_TESTS.md](docs/AUTOMATED_TESTS.md) for what each one checks.
 - [docs/USER_TEST_CASES.md](docs/USER_TEST_CASES.md) is the manual UAT
   checklist for verifying the real Shopify + Claude API path end to end.
