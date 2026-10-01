@@ -8,6 +8,12 @@ analyzes (and eventually acts on) real store operations data.
 Background and portfolio strategy live in life-os:
 [`raw/venture/shopify-ops-agent.md`](../../life-os/raw/venture/shopify-ops-agent.md).
 
+## Design docs
+
+- [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) — goals, scope by phase, functional/non-functional requirements, risks, traceability to tests
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — layers, flows, design decisions (ADRs), target structure for 2B/2C/3
+- [docs/TECH_SPEC.md](docs/TECH_SPEC.md) — modules, config and scopes, GraphQL operations, data contracts, executor algorithm, CLI, extension guide
+
 ## Phases
 
 - **Phase 1 (done)** — Read-only analyst agent: pull inventory/orders →
