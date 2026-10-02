@@ -2,8 +2,41 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 상태 | Phase 1·2A는 코드 기준 명세, 2B·2C는 설계 초안 |
-| 관련 문서 | [REQUIREMENTS.md](REQUIREMENTS.md) · [ARCHITECTURE.md](ARCHITECTURE.md) · [AUTOMATED_TESTS.md](AUTOMATED_TESTS.md) |
+| 문서 상태 | **As-built, 2026-10-01 기준.** Phase 1 완료 · Phase 2A 구현(PR #1, live 미검증) · 2B·2C는 설계 |
+| 관련 문서 | [REQUIREMENTS.md](REQUIREMENTS.md) · [ARCHITECTURE.md](ARCHITECTURE.md) · [AUTOMATED_TESTS.md](AUTOMATED_TESTS.md) · [USER_TEST_CASES.md](USER_TEST_CASES.md) |
+
+---
+
+## 0. 진행 현황
+
+### 0.1 타임라인
+
+| 날짜 | 이정표 | 근거 |
+|---|---|---|
+| 2026-06-30 | 원안 수립: 읽기 분석 → 승인 기반 쓰기 → 모니터링 3단계 | 프로젝트 노트 |
+| 2026-07-14 | Dev Dashboard 앱 + client credentials grant 인증 검증, 테스트 16 → 20 | UAT E-1, E-2 |
+| 2026-07-15 | **Phase 1 완료** — live 스토어에서 첫 분석 리포트 (품절 위험 3건, 저성과 8건) | UAT TC-01~03, TC-07 |
+| 2026-07-18 | repo public 전환 | GitHub |
+| 2026-07-29 | Phase 2 설계 확정 → 이 문서의 **2C** (`ProposedAction`, `update_inventory` 1개, SQLite, Streamlit) | 설계 SOW |
+| 2026-10-01 | **Phase 2A 구현** — storefront 셋업 (plan → review → apply), 테스트 20 → 61, 설계 문서 3종 | PR #1 |
+
+### 0.2 Phase별 상태
+
+| Phase | 내용 | 코드 | 자동 테스트 | live 검증 |
+|---|---|---|---|---|
+| 1 | 읽기 전용 운영 분석 | ✅ main | 20 | ✅ TC-01·02·03·07 / ☐ TC-04(부분)·05·06·08·09 |
+| 2A | Storefront 셋업 | ✅ PR #1 (미머지) | +41 | ☐ TC-10~15 (쓰기 scope 추가 필요) |
+| 2B | 헤드리스 storefront | — | — | — |
+| 2C | 재고 승인 게이트 | — (설계 확정) | — | — (TC-P2-01~06 정의됨) |
+| 3 | 모니터링 + 알림 | — | — | — |
+
+### 0.3 live 환경에서 확인한 사실 (Phase 1, 2026-07-14~15)
+
+- **Order 객체는 scope와 별도의 보호 관문이 있다.** `read_orders`가 있어도 `ACCESS_DENIED` → custom distribution(비가역, 단일 스토어 전용)을 선택해 해결 (E-5)
+- **CrewAI 간헐 실패의 원인은 `max_tokens` 기본값 4096.** extended thinking이 예산을 다 쓰면 text 블록 없이 잘린다 → 에이전트마다 `max_tokens=16384` (E-6)
+- **스토어 표시 이름 ≠ myshopify 서브도메인.** 잘못 쓰면 토큰 endpoint가 404 (E-4)
+- 토큰 응답의 `scope` 필드로 실제 부여된 권한을 확인할 수 있다 (E-2)
+- 시드 데이터: generated test data + Simple Sample Data(Clothes) → 상품 47, 주문 20 (E-7)
 
 ---
 
@@ -96,6 +129,7 @@ shopify-ops-agent/
 | 2A | `write_online_store_navigation` | `menuUpdate` |
 | 2A | `read_publications` | `publications` 조회 |
 | 2A | `write_publications` | `publishablePublish` |
+| 2C (예정) | `write_inventory` | `update_inventory` — mutation 이름은 착수 시 확인 |
 
 scope를 바꾸면 Dev Dashboard에서 새 버전을 릴리스하고 dev 스토어에 다시 설치해야 한다.
 
@@ -451,7 +485,7 @@ format_records(records) -> str
 
 ## 11. 확장 가이드
 
-### 11.1 새 쓰기 기능을 추가할 때 (예: 2C 가격 변경)
+### 11.1 새 쓰기 기능을 추가할 때 (예: 2C `update_inventory`)
 
 1. `models/`에 새 Draft와 Plan 모델을 만든다. 모든 항목은 `PlanItem`을 상속해 `approved=False`로 시작한다.
 2. `tools/shopify_write_tool.py`에 함수를 추가한다. **CrewAI 도구로 만들지 않는다.** `userErrors`는 `_raise_user_errors`로 처리한다.
@@ -472,25 +506,106 @@ format_records(records) -> str
 | 에이전트 친화 | 상품·조직 JSON-LD, 정책 페이지 노출 |
 | 이 레포와의 관계 | 쓰기는 계속 이 레포의 Executor만 한다. 프론트는 읽기 전용 |
 
-### 11.3 Phase 2C — Ops executor + 승인 UI (설계 초안)
+### 11.3 Phase 2C — 재고 승인 게이트 (설계 확정 2026-07-29)
 
-| 항목 | 초안 |
+**완료 기준:** ① 승인 게이트가 돈다 ② 기록을 한 화면에서 시간순으로 훑을 수 있다. 이 둘이면 끝이다.
+
+**에이전트와 실행기**
+
+| | Analyst | InventoryExecutor |
+|---|---|---|
+| 종류 | LLM (CrewAI, Sonnet 5) | 결정론적 코드 |
+| 입력 | 코드가 선별한 후보 + 확정된 `current_value` | 승인된 `ProposedAction` |
+| 출력 | `ProposedAction[]` | Shopify 반영 결과 + 로그 행 |
+| 하지 않는 일 | 현재값 조회·계산 | 재해석, 값 조정, 추가 판단 |
+
+**계약**
+
+```python
+class ProposedAction(BaseModel):
+    variant_id: str                      # Shopify variant GID
+    title: str
+    action: Literal["update_inventory"]
+    current_value: int                   # 코드가 조회한 확정값
+    proposed_value: int                  # LLM 제안
+    reason: str                          # 왜 바꾸는가
+    evidence: str                        # 무엇에 근거했는가 (예: 재고 3, 최근 주문 2건)
+```
+
+승인 단위 = 이 객체 하나. 감사 로그 한 행 = 이 객체의 생애 한 사건.
+
+**감사 로그 (SQLite, stdlib `sqlite3`)**
+
+| 컬럼 | 설명 |
 |---|---|
-| 에이전트 | Ops Planner: `AnalysisReport`를 입력받아 조치안 제안 |
-| 계약 | `OpsPlan`: `PriceChangeDraft(variant_id, current_price, new_price, reason)`, `ProductStatusDraft(product_id, new_status, reason)` 등, 모두 `PlanItem` |
-| 안전 장치 | 가격 변경률 상한(예: ±20%) 초과 시 별도 확인 플래그 필요, 1회 적용 항목 수 상한 |
-| 쓰기 | `productVariantsBulkUpdate`(가격), `productUpdate`(상태) — 버전별 시그니처는 구현 시 공식 문서로 재확인 |
-| Executor | `OpsExecutor`, StoreExecutor와 같은 기록 형식(`section` 값만 추가) |
-| UI | Streamlit `app.py`: 계획 목록 → 항목별 승인 체크 → dry run 결과 표 → 실행 버튼. `load_plan`·`review_plan`(ask 교체)·Executor 재사용 |
-| 닫힌 루프 | 다음 Analyst 실행에 최근 감사 로그를 컨텍스트로 제공해 조치 효과를 점검 |
+| `id` | PK |
+| `timestamp` | ISO 8601 |
+| `actor` | `agent` \| `human` |
+| `action` | `update_inventory` |
+| `variant_id`, `title` | 대상 |
+| `before`, `after` | 실행 전후 값 (제안 단계에서는 current / proposed) |
+| `decision` | `proposed` \| `approved` \| `rejected` |
+| `note` | 반려 사유 등 |
 
----
+**기술 결정**
 
-## 12. 알려진 제한 (Phase 2A)
+| 항목 | 값 |
+|---|---|
+| 쓰기 도구 | `update_inventory` **1개** (가격·할인은 사고 비용 때문에 제외) |
+| 추가 scope | `write_inventory` |
+| mutation | ⚠️ 착수 시 Admin API 2026-04 문서로 확인 (`inventoryAdjustQuantities` 계열로 추정, 미확인) |
+| 저장소 | SQLite (추가 의존성 없음) |
+| UI | Streamlit 로컬, 화면 2개: 승인 큐 / 로그 뷰. 배포 없음 |
+| 인증·LLM | Phase 1 그대로 |
 
-- 단일 variant 상품만 지원. 옵션이 있는 상품은 계획에 넣을 수 없다.
-- 이미지·파일 업로드 없음.
-- 기존 컬렉션·페이지는 갱신하지 않는다 (`exists`로 남김).
-- `productSet`은 컬렉션 연결을 전체 교체한다. 스토어에서 수동으로 추가한 연결은 재적용 시 사라진다.
-- 메뉴는 1단계 항목만 지원 (하위 메뉴 없음).
-- 실 스토어 대상 검증 전 (UAT TC-10~TC-15 미실행).
+**작업 순서** (의존 순서, 쓰기 도구가 마지막)
+
+| # | 작업 | 산출물 |
+|---|---|---|
+| 1 | `ProposedAction` 스키마, `AnalysisReport` 교체 | `models/schemas.py` |
+| 2 | 선별·`current_value` 조회를 코드로 분리 | 신규 모듈 (예: `selection.py`) |
+| 3 | 감사 로그: `log_proposal` / `log_decision` / `read_log` | `audit.py`, `.db` |
+| 4 | Streamlit 승인 큐 + 로그 뷰 | `app.py` |
+| 5 | `update_inventory` + InventoryExecutor | `tools/shopify_write_tool.py`, `executor/` |
+| 6 | 곁다리: 조회 `limit` 기본값 연동, DRAFT·ARCHIVED 제외 | `tools/shopify_tool.py`, 선별 코드 |
+
+4번까지 끝나면 Shopify 쓰기 없이 게이트 전체(제안 → 승인·반려 → 기록)가 도는 걸 볼 수 있다. 그다음 5번을 꽂으면 첫 쓰기가 이미 검증된 파이프를 탄다.
+
+**검증 (UAT)**
+
+| ID | 시나리오 | 기대 결과 |
+|---|---|---|
+| TC-P2-01 | 분석 실행 | 승인 큐에 current → proposed, reason, evidence가 뜬다 |
+| TC-P2-02 | 현재값 대조 | 화면의 `current_value`가 Shopify admin 실제 재고와 같다 (**이 phase의 진짜 시험**) |
+| TC-P2-03 | 승인 | Shopify 반영, 로그에 `approved` + before/after |
+| TC-P2-04 | 반려 + 사유 | Shopify 무변화, 로그에 `rejected` + note |
+| TC-P2-05 | 재실행 후 로그 | 이전 기록이 시간순으로 남아 있다 |
+| TC-P2-06 | DRAFT 상품 | 승인 큐에 뜨지 않는다 |
+
+**2A와 정리할 것 (착수 시 결정)**
+
+- 감사 로그 형식: 2A는 JSONL, 2C는 SQLite. 2A 기록을 같은 테이블로 옮길지, 두 형식을 유지할지
+- 승인 UI: 2A의 CLI `review`를 Streamlit 화면으로 합칠지
+- 파일 위치: 설계 원안은 `executor.py` 단일 파일이었으나 2A가 `executor/` 패키지를 만들었으므로 `executor/inventory_executor.py`가 자연스럽다
+
+## 12. 알려진 제한
+
+### 12.1 Phase 1 (분석)
+
+- **페이지네이션 없음** — `products(first: 50)`, `orders(first: 20)`, `lineItems(first: 5)` 전부 커서 없음. 51번째 상품부터 조용히 누락된다
+- **조회 `limit` 불일치** — `PRODUCTS_LIMIT=50`이지만 `ShopifyProductsInput.limit` 기본값은 20. 50은 프롬프트로만 전달되므로 LLM이 인자를 넘기지 않으면 일부만 보고도 보고서는 정상처럼 보인다
+- **DRAFT·ARCHIVED 미제외** — `status`를 조회하지만 판정에 쓰지 않는다
+- **"저성과" 판정이 표본에 좌우됨** — 상품 47개를 주문 20건에 대조하므로 안 나오는 게 정상인 상품이 플래그된다. 성과가 아니라 표본이 만드는 결과
+- **판단 계층 테스트 0** — 자동 테스트는 스키마·설정·도구 HTTP 모킹뿐. 임계치 적용을 LLM이 하므로 단위 테스트할 코드가 없다 (2C의 선별 코드 분리로 테스트 가능해짐)
+- **멀티 로케이션 재고 미지원** — `inventoryQuantity`, `totalInventory`는 합산값
+- **토큰 캐시가 모듈 전역 dict** — 로컬 단일 세션에선 무해, 다중 사용자에선 공유 상태
+
+### 12.2 Phase 2A (storefront 셋업)
+
+- 단일 variant 상품만 지원
+- 이미지·파일 업로드 없음
+- 기존 컬렉션·페이지는 갱신하지 않는다 (`exists`로 남김)
+- `productSet`은 컬렉션 연결을 전체 교체한다. 스토어에서 수동으로 추가한 연결은 재적용 시 사라진다
+- 메뉴는 1단계 항목만 (하위 메뉴 없음)
+- 감사 로그는 JSONL 파일 (2C의 SQLite와 형식이 다름)
+- **live 스토어 대상 실행 0회** (UAT TC-10~15 미실행)

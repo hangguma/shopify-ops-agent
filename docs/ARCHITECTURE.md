@@ -106,7 +106,7 @@ flowchart TB
 
 | 레이어 | 책임 | 규칙 |
 |---|---|---|
-| 진입점 | 인자 파싱, 설정 검증, 결과 출력·저장 | 비즈니스 로직 없음. 같은 함수를 2C의 Streamlit도 호출 |
+| 진입점 | 인자 파싱, 설정 검증, 결과 출력·저장 | 비즈니스 로직 없음. 2C의 Streamlit도 같은 원칙(화면은 얇게, 로직은 모듈에) |
 | 오케스트레이션 | 에이전트와 태스크를 Crew로 조립 | 기능별로 크루 분리 (분석 크루를 셋업이 건드리지 않음) |
 | 에이전트·태스크 | 판단과 제안 | **읽기 도구만**. 출력은 반드시 Pydantic 계약 |
 | 계약 | 에이전트 ↔ 사람 ↔ Executor 사이 데이터 형식 | 검증은 여기서. 교차 참조는 별도 메서드로 점검 |
@@ -224,7 +224,7 @@ flowchart LR
 ### ADR-2. 계획은 파일이다
 
 - **결정:** 에이전트 출력은 Pydantic 모델로 검증한 뒤 JSON 파일로 저장한다.
-- **이유:** 사람이 읽고, diff하고, 손으로 고칠 수 있다. 같은 계획을 다시 적용할 수 있다. UI(2C)가 바뀌어도 형식은 그대로다.
+- **이유:** 사람이 읽고, diff하고, 손으로 고칠 수 있다. 같은 계획을 다시 적용할 수 있다. 승인 UI가 CLI에서 다른 화면으로 바뀌어도 형식은 그대로다.
 - **대가:** 파일 관리가 필요하다 (`outputs/plans/`, git 제외).
 
 ### ADR-3. 기본은 dry run
@@ -295,6 +295,51 @@ flowchart LR
 
 ## 8. 목표 구조 (Phase 2B · 2C · 3)
 
+### 8.1 Phase 2C — 재고 승인 게이트 (설계 확정 2026-07-29)
+
+2C는 2A와 같은 원칙(LLM 제안 → 사람 승인 → 코드 실행)을 **운영 데이터**에 적용한다. 2A와 다른 점은 두 가지다. 승인 화면에 뜨는 현재값을 **코드가 조회**한다는 것, 그리고 승인 UI·기록이 **Streamlit + SQLite**라는 것이다.
+
+```mermaid
+flowchart TB
+    H(("운영자"))
+    subgraph UI["Streamlit · 로컬"]
+        Q["승인 큐<br/>current → proposed · reason · evidence"]
+        LV["로그 뷰<br/>시간순"]
+    end
+    subgraph CORE["Agent Core"]
+        FL["선별·조회 (코드)<br/>재고 임계치 · 주문 매칭<br/>DRAFT·ARCHIVED 제외 · current_value"]
+        AN["Analyst (LLM)<br/>우선순위 · reason · proposed_value"]
+        EX["InventoryExecutor (코드)<br/>승인된 값을 그대로 실행"]
+    end
+    DB[("SQLite 감사 로그")]
+    SH[("Shopify Admin API<br/>read tools · update_inventory")]
+
+    H --> UI
+    FL --> SH
+    FL -->|후보 + 확정된 현재값| AN
+    AN -->|ProposedAction 목록| Q
+    Q -->|승인| EX
+    Q -->|반려 + 사유| DB
+    EX -->|update_inventory| SH
+    AN -.proposed.-> DB
+    EX -.approved · before/after.-> DB
+    DB --> LV --> H
+```
+
+**읽는 법:** Analyst에서 Executor로 가는 직선이 없다. 둘 사이에 반드시 사람이 낀다. 그리고 승인 큐의 현재값은 LLM이 아니라 코드(선별·조회)에서 온다. 승인 화면의 숫자가 검증되지 않으면 승인 자체가 근거를 잃는다.
+
+| 결정론 경계 | 코드가 한다 | LLM이 한다 |
+|---|---|---|
+| 대상 선별 | 재고 ≤ `LOW_STOCK_THRESHOLD`, 최근 주문 매칭, DRAFT·ARCHIVED 제외 | 어느 것부터 급한가 |
+| 값 | `current_value` 조회 | `proposed_value` 제안 |
+| 설명 | — | `reason`, `evidence` |
+
+Phase 1은 임계치가 `settings.py`에 있었지만 규칙의 **적용**은 LLM이 했다. 2C에서 이 경계를 코드로 고정한다.
+
+**2A와의 관계 (열린 결정):** 2A 감사 로그는 JSONL 파일, 2C는 SQLite 테이블이다. 2C 착수 시 2A 기록을 같은 테이블로 옮길지, 두 형식을 유지할지 정한다. 2A의 승인 게이트(CLI `review`)를 2C의 Streamlit 화면으로 합칠지도 그때 정한다.
+
+### 8.2 전체 목표 구조
+
 ```mermaid
 flowchart TB
     subgraph IN["입력"]
@@ -303,37 +348,30 @@ flowchart TB
         SCHED["스케줄러 (Phase 3)"]
     end
     subgraph AGENTS["에이전트 (읽기 전용)"]
-        BLD["Builder<br/>셋업 계획"]
-        ANA["Analyst<br/>운영 보고서"]
-        OPS["Ops Planner (2C)<br/>가격·재고 조치안"]
+        BLD["Builder (2A)<br/>셋업 계획"]
+        ANA["Analyst (1 → 2C)<br/>보고서 → 재고 변경안"]
     end
     subgraph GATE["승인 게이트"]
         CLI["CLI review (2A)"]
-        UI["Streamlit UI (2C)"]
+        UI["Streamlit 승인 큐 (2C)"]
     end
     subgraph EXEC["Executor (결정론적)"]
         SE["StoreExecutor (2A)"]
-        OE["OpsExecutor (2C)"]
+        IE["InventoryExecutor (2C)"]
     end
     SHOP[("Shopify Admin API")]
     FRONT["헤드리스 storefront (2B)<br/>Storefront API"]
-    LOG["감사 로그"]
+    LOG["감사 로그<br/>JSONL (2A) · SQLite (2C)"]
     ALERT["알림 (Phase 3)"]
 
-    BR --> BLD
-    DATA --> ANA --> OPS
+    BR --> BLD --> CLI --> SE
+    DATA --> ANA --> UI --> IE
     SCHED --> ANA
     ANA --> ALERT
-    BLD --> CLI
-    BLD --> UI
-    OPS --> UI
-    CLI --> SE
-    UI --> SE
-    UI --> OE
     SE --> SHOP
-    OE --> SHOP
+    IE --> SHOP
     SE --> LOG
-    OE --> LOG
+    IE --> LOG
     SHOP --> FRONT
     SHOP --> DATA
 ```
@@ -341,7 +379,7 @@ flowchart TB
 | Phase | 추가 요소 | 기존 구조에서 재사용하는 것 |
 |---|---|---|
 | 2B | 헤드리스 프론트 (Hydrogen 또는 Next.js), Storefront API 토큰 | 2A가 만든 상품·컬렉션·페이지·메뉴 데이터 그대로 |
-| 2C | Ops Planner 에이전트, `OpsPlan` 계약, `OpsExecutor`, Streamlit UI | plan → approve → apply 파이프라인, 감사 로그, 쓰기 레이어, `load_plan`/`review_plan` 함수 |
-| 3 | 스케줄러(cron 또는 scheduled task), 알림 채널 | Analyst 크루. 알림은 승인 대기 계획만 만들고 실행하지 않음 (FR-3.3) |
+| 2C | `ProposedAction` 계약, 선별·조회 코드, SQLite 감사 로그, Streamlit 화면 2개(승인 큐·로그 뷰), `update_inventory` 쓰기 함수, `InventoryExecutor` | Analyst 크루(출력 계약만 교체), 토큰·GraphQL 레이어, `_raise_user_errors`, "쓰기 함수는 도구가 아니다" 원칙 |
+| 3 | 스케줄러(cron 또는 scheduled task), 알림 채널 | Analyst 크루. 알림은 승인 대기 항목만 만들고 실행하지 않음 (FR-3.3) |
 
-설계상 새 기능은 "새 에이전트 + 새 계약 + 새 Executor"를 추가하는 방식이고, 승인 게이트와 감사 로그는 공유한다.
+설계상 새 기능은 "새 계약 + 새 Executor"를 추가하는 방식이고, 승인 게이트와 감사 로그 원칙은 공유한다.

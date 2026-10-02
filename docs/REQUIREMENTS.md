@@ -47,14 +47,16 @@
 | 1 | ✅ 완료 | 읽기 전용 분석: 상품·재고·주문 조회 → 품절 위험·저성과 상품 보고서 |
 | 2A | ✅ 구현 (PR #1, live 검증 전) | 스토어 셋업: 브리프 → StorePlan → 승인 → Online Store 적용 |
 | 2B | 계획 | 헤드리스 storefront (Hydrogen 또는 Next.js + Storefront API) |
-| 2C | 계획 | 운영 executor (가격·재고 변경) + Streamlit 승인 UI |
+| 2C | 계획 (설계 확정 2026-07-29) | 재고 승인 게이트: `ProposedAction` 제안 → Streamlit 승인 큐 → `update_inventory` 1개 → SQLite 감사 로그 + 로그 뷰 |
 | 3 | 계획 (stretch) | 정기 모니터링 + 알림 |
 
 ### 2.3 범위 밖 (현재)
 
 - 결제, 환불, 고객 개인정보 수정
+- **가격·할인 변경** (`update_price`, `create_discount`) — 사고 비용이 커서 2C에서도 의도적으로 제외 (2026-07-29 결정)
 - 광고 집행(Meta/Google 등 외부 채널)
 - 상품 이미지 생성·업로드, 멀티 variant 상품, 테마 코드 편집 (2A 기준)
+- 공개 배포, 다중 사용자 (2C UI도 로컬 전용)
 - 운영 중인 실 스토어 대상 실행 (dev 스토어에서 검증 후 별도 결정)
 
 ---
@@ -105,15 +107,19 @@
 | FR-2B.3 | 장바구니·결제는 Shopify checkout으로 넘긴다 | M |
 | FR-2B.4 | AI 쇼핑 에이전트가 읽을 수 있는 구조화 데이터(JSON-LD 등)를 노출한다 | S |
 
-### 3.4 Phase 2C — 운영 executor + 승인 UI (계획)
+### 3.4 Phase 2C — 재고 승인 게이트 (계획, 설계 확정 2026-07-29)
+
+완료 기준은 두 가지뿐이다: ① 승인 게이트가 돈다(제안이 큐에 뜨고, 승인하면 반영, 반려하면 무변화) ② 제안·결정·실행 기록을 한 화면에서 시간순으로 훑을 수 있고, 재실행해도 이전 기록이 남는다. 도구 개수·UI 완성도·배포는 완료 기준이 아니다.
 
 | ID | 요구사항 | 우선 |
 |---|---|---|
-| FR-2C.1 | Analyst 보고서의 플래그 상품에 대해 조치안(가격 조정, 재고 보충 표시, 비활성화)을 제안한다 | M |
-| FR-2C.2 | 조치안도 2A와 같은 plan → approve → apply 파이프라인을 거친다 | M |
-| FR-2C.3 | 웹 UI(Streamlit)에서 계획을 보고 항목별로 승인한다 | M |
-| FR-2C.4 | 가격 변경에는 상한(예: ±20%)을 두고, 넘으면 추가 확인을 요구한다 | S |
-| FR-2C.5 | 적용 결과를 Analyst가 다음 실행에서 다시 점검한다 (닫힌 루프) | S |
+| FR-2C.1 | Analyst는 플래그 대신 `ProposedAction`(variant, 현재값, 제안값, reason, evidence)을 낸다. 승인 단위는 "문제"가 아니라 "변경안"이다 | M |
+| FR-2C.2 | 재고 임계치 필터, 최근 주문 매칭, DRAFT·ARCHIVED 제외, `current_value` 조회는 **코드**가 한다. LLM은 우선순위·reason·proposed_value·evidence만 맡는다 | M |
+| FR-2C.3 | 로컬 Streamlit 승인 큐에서 항목별로 승인 또는 반려(사유 입력)한다 | M |
+| FR-2C.4 | 승인된 항목만 결정론적 Executor가 `update_inventory`로 반영한다. 반려는 Shopify를 건드리지 않는다 | M |
+| FR-2C.5 | 제안·승인·반려·실행을 SQLite 감사 로그에 남긴다 (actor, decision, before/after, note) | M |
+| FR-2C.6 | 로그 뷰에서 기록을 시간순으로 보고, 재실행 후에도 이전 기록이 남는다 | M |
+| FR-2C.7 | 상품 조회 도구의 `limit` 기본값을 `PRODUCTS_LIMIT`과 연동한다 (현재 20 vs 50 불일치) | S |
 
 ### 3.5 Phase 3 — 모니터링 (계획)
 
@@ -133,7 +139,7 @@
 | NFR-2 | 안전 | 쓰기 작업의 기본 모드는 dry run이다 | `apply`에 `--execute`가 없으면 dry run |
 | NFR-3 | 신뢰성 | Shopify의 `userErrors`(200 응답 내 실패)를 성공으로 오인하지 않는다 | `_raise_user_errors` |
 | NFR-4 | 신뢰성 | 재실행에 안전하다 (멱등성) | handle 기반 조회 후 생성, `productSet` upsert |
-| NFR-5 | 추적성 | 모든 쓰기 시도는 시각·대상·결과와 함께 append-only 로그에 남는다 | `outputs/audit_log.jsonl` |
+| NFR-5 | 추적성 | 모든 쓰기 시도는 시각·대상·결과와 함께 append-only 로그에 남는다 | 2A: `outputs/audit_log.jsonl` · 2C: SQLite 테이블 (형식 통일은 2C 착수 시 결정) |
 | NFR-6 | 보안 | API 키·시크릿은 코드와 git에 넣지 않는다 | `.env` + `.gitignore`, 토큰은 런타임 발급·메모리 캐시 |
 | NFR-7 | 보안 | 앱 scope는 phase에 필요한 최소한만 부여한다 | Phase 1은 읽기 3종, 2A에서 쓰기 6종 추가 |
 | NFR-8 | 테스트 가능성 | 내부 로직은 네트워크·키 없이 테스트한다 | 61개 단위 테스트 전부 mock |
@@ -165,9 +171,11 @@
 | R-1 | LLM이 브리프에 없는 주장(효능, 인증)을 상품 설명에 넣음 | 허위 표시 | 프롬프트 금지 규칙 + 사람 리뷰 + 계획 파일 직접 수정 가능 |
 | R-2 | 쓰기 scope 누락으로 적용 중간 실패 | 부분 적용 | 항목별 오류 기록, 실패해도 계속, 재실행 시 멱등 |
 | R-3 | Shopify API 버전 변경으로 mutation 형태가 바뀜 | 쓰기 실패 | API 버전 고정, 쓰기 레이어를 한 모듈에 격리 |
-| R-4 | `productSet`의 목록 필드(컬렉션)가 전체 교체 방식이라 스토어에서 수동 추가한 컬렉션 연결이 사라짐 | 데이터 손실 | 문서화, 2C에서 병합 옵션 검토 |
+| R-4 | `productSet`의 목록 필드(컬렉션)가 전체 교체 방식이라 스토어에서 수동 추가한 컬렉션 연결이 사라짐 | 데이터 손실 | 문서화. 병합 방식은 필요해지면 별도 결정 |
 | R-5 | CrewAI 응답이 thinking에서 잘려 빈 응답 | 실행 실패 | `max_tokens=16384` (Phase 1 E-6에서 진단·해결) |
 | R-6 | 메뉴 교체가 기존 메뉴 항목을 덮어씀 | 탐색 구조 손실 | 메뉴는 별도 승인 항목, dry run에서 결과 항목 수 표시 |
+| R-7 | 승인 화면의 현재값이 LLM이 옮겨 적은 숫자 | 검증 안 된 값을 보고 승인 → 게이트 무의미 | 2C에서 `current_value`를 코드가 조회 (FR-2C.2), UAT로 admin 실제값과 대조 |
+| R-8 | 승인 큐에 쓸모없는 항목(초안 상품, 일부 카탈로그만 본 결과)이 뜸 | 반려만 쌓여 게이트 검증 불가 | DRAFT·ARCHIVED 제외, 조회 limit 연동 (FR-2C.2, FR-2C.7) |
 
 ---
 

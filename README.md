@@ -23,9 +23,13 @@ Background and portfolio strategy live in life-os:
   approves item by item → a deterministic Executor applies only approved items
   to the Online Store, with dry run by default and a JSONL audit log
 - **Phase 2B** — Headless storefront (Hydrogen / Next.js on the Storefront API)
-- **Phase 2C** — Ops executor (price/inventory write actions from the
-  analyst's report) + Streamlit approval UI on top of the same plan → approve
-  → apply pipeline
+- **Phase 2C** — Inventory approval gate (design confirmed 2026-07-29):
+  the analyst proposes `ProposedAction`s (current → proposed inventory, with
+  reason and evidence), `current_value` is looked up by code, not the LLM; a
+  local Streamlit queue approves/rejects each one; a deterministic executor
+  calls a single write tool, `update_inventory`; every proposal and decision
+  goes to a SQLite audit log with a log view. Price and discount writes are
+  out of scope on purpose.
 - **Phase 3 (stretch)** — Scheduled monitoring + alerts
 
 ## Setup
