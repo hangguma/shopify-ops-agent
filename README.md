@@ -5,9 +5,6 @@ setup path, so this uses a free Shopify Partner development store instead.
 Goes beyond a simple RAG search bot — a multi-step, tool-use agent that
 analyzes (and eventually acts on) real store operations data.
 
-Background and portfolio strategy live in life-os:
-[`raw/venture/shopify-ops-agent.md`](../../life-os/raw/venture/shopify-ops-agent.md).
-
 ## Design docs
 
 - [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) — goals, scope by phase, functional/non-functional requirements, risks, traceability to tests
