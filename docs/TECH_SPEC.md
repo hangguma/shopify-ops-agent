@@ -487,7 +487,7 @@ format_records(records) -> str
 
 ### 11.1 새 쓰기 기능을 추가할 때 (예: 2C `update_inventory`)
 
-1. `models/`에 새 Draft와 Plan 모델을 만든다. 모든 항목은 `PlanItem`을 상속해 `approved=False`로 시작한다.
+1. `models/`에 변경안 모델을 만든다. 승인 단위는 "문제"가 아니라 "변경안"이어야 한다 (2A: `PlanItem`을 상속한 Draft, `approved=False`로 시작 · 2C: `ProposedAction`, 승인 여부는 감사 로그의 `decision`으로 기록). 사람이 보는 현재값은 코드가 조회한다.
 2. `tools/shopify_write_tool.py`에 함수를 추가한다. **CrewAI 도구로 만들지 않는다.** `userErrors`는 `_raise_user_errors`로 처리한다.
 3. `executor/`에 Executor를 만든다. dry run 기본, 항목별 try/except, `_record`로 감사 로그.
 4. 에이전트는 읽기 도구만 가진다. 출력은 3의 Plan 모델.
