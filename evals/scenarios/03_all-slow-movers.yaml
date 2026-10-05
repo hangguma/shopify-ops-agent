@@ -1,0 +1,94 @@
+name: all-slow-movers
+why: "Agent reports only products with activity, or truncates the list, instead of every product that meets the slow-mover rule."
+
+products:
+  - title: Wool Beanie
+    variants:
+      - {id: "gid://shopify/ProductVariant/1301", title: M / Black, price: "41.00", qty: 23}
+  - title: Rain Shell
+    variants:
+      - {id: "gid://shopify/ProductVariant/1302", title: M / Black, price: "42.00", qty: 26}
+  - title: Cargo Short
+    variants:
+      - {id: "gid://shopify/ProductVariant/1303", title: M / Black, price: "43.00", qty: 29}
+  - title: Chore Coat
+    variants:
+      - {id: "gid://shopify/ProductVariant/1304", title: M / Black, price: "44.00", qty: 32}
+  - title: Fleece Vest
+    variants:
+      - {id: "gid://shopify/ProductVariant/1305", title: M / Black, price: "45.00", qty: 35}
+  - title: Denim Jacket
+    variants:
+      - {id: "gid://shopify/ProductVariant/1306", title: M / Black, price: "46.00", qty: 38}
+  - title: Knit Polo
+    variants:
+      - {id: "gid://shopify/ProductVariant/1307", title: M / Black, price: "47.00", qty: 41}
+  - title: Quilted Liner
+    variants:
+      - {id: "gid://shopify/ProductVariant/1308", title: M / Black, price: "48.00", qty: 44}
+  - title: Track Pant
+    variants:
+      - {id: "gid://shopify/ProductVariant/1309", title: M / Black, price: "49.00", qty: 47}
+  - title: Oxford Shirt
+    variants:
+      - {id: "gid://shopify/ProductVariant/1310", title: M / Black, price: "50.00", qty: 50}
+  - title: Corduroy Cap
+    variants:
+      - {id: "gid://shopify/ProductVariant/1311", title: M / Black, price: "51.00", qty: 53}
+  - title: Merino Crew
+    variants:
+      - {id: "gid://shopify/ProductVariant/1312", title: M / Black, price: "52.00", qty: 56}
+  - title: Everyday Tee
+    variants:
+      - {id: "gid://shopify/ProductVariant/1351", title: M / Black, price: "25.00", qty: 40}
+  - title: Crew Sock 3-Pack
+    variants:
+      - {id: "gid://shopify/ProductVariant/1352", title: M / Black, price: "25.00", qty: 40}
+  - title: Logo Hoodie
+    variants:
+      - {id: "gid://shopify/ProductVariant/1353", title: M / Black, price: "25.00", qty: 40}
+
+orders:
+  - name: "#1301"
+    created_at: "2026-10-02T11:00:00Z"
+    line_items:
+      - {title: Crew Sock 3-Pack, quantity: 1}
+  - name: "#1302"
+    created_at: "2026-10-03T12:00:00Z"
+    line_items:
+      - {title: Logo Hoodie, quantity: 1}
+  - name: "#1303"
+    created_at: "2026-10-04T13:00:00Z"
+    line_items:
+      - {title: Everyday Tee, quantity: 1}
+  - name: "#1304"
+    created_at: "2026-10-01T14:00:00Z"
+    line_items:
+      - {title: Crew Sock 3-Pack, quantity: 1}
+  - name: "#1305"
+    created_at: "2026-10-02T15:00:00Z"
+    line_items:
+      - {title: Logo Hoodie, quantity: 1}
+  - name: "#1306"
+    created_at: "2026-10-03T16:00:00Z"
+    line_items:
+      - {title: Everyday Tee, quantity: 1}
+
+expect:
+  must_flag:
+    - "gid://shopify/ProductVariant/1301"
+    - "gid://shopify/ProductVariant/1302"
+    - "gid://shopify/ProductVariant/1303"
+    - "gid://shopify/ProductVariant/1304"
+    - "gid://shopify/ProductVariant/1305"
+    - "gid://shopify/ProductVariant/1306"
+    - "gid://shopify/ProductVariant/1307"
+    - "gid://shopify/ProductVariant/1308"
+    - "gid://shopify/ProductVariant/1309"
+    - "gid://shopify/ProductVariant/1310"
+    - "gid://shopify/ProductVariant/1311"
+    - "gid://shopify/ProductVariant/1312"
+  must_not_flag:
+    - "gid://shopify/ProductVariant/1351"
+    - "gid://shopify/ProductVariant/1352"
+    - "gid://shopify/ProductVariant/1353"

@@ -13,7 +13,7 @@ from datetime import date
 
 from config import settings
 from config.logging_setup import setup_logging
-from crew import build_crew
+from crew import run_analysis
 
 
 def save_report(markdown: str) -> str:
@@ -34,18 +34,19 @@ def main() -> None:
 
     log.info("Starting Shopify ops analysis - store: %s", settings.SHOPIFY_STORE_DOMAIN)
 
-    crew = build_crew()
     try:
-        result = crew.kickoff()
+        report = run_analysis()
     except Exception as e:  # noqa: BLE001
         log.error("Analysis failed: %s", e)
         log.error("  - Check ANTHROPIC_API_KEY validity.")
         log.error("  - Check SHOPIFY_STORE_DOMAIN / SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET and API scopes.")
         return
 
-    report = getattr(result, "pydantic", None)
-    markdown = report.markdown if report else str(result)
+    for f in report.flagged_products:
+        if f.needs_review:
+            log.warning("Needs review (no variant ID resolved): %s", f.title)
 
+    markdown = report.markdown
     path = save_report(markdown)
     print("\n" + "=" * 50)
     print(markdown)

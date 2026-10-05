@@ -1,0 +1,30 @@
+name: threshold-boundary
+# Chosen by Claude (the other four are the user's).
+why: "Agent applies the low-stock rule loosely: misses qty == threshold (5, 'at or below') or flags qty 6."
+
+products:
+  - title: Ribbed Tank
+    variants:
+      - {id: "gid://shopify/ProductVariant/1501", title: S / Black, price: "28.00", qty: 5}
+  - title: Pleated Trouser
+    variants:
+      - {id: "gid://shopify/ProductVariant/1502", title: 30 / Navy, price: "98.00", qty: 6}
+  - title: Everyday Tee
+    variants:
+      - {id: "gid://shopify/ProductVariant/1503", title: M / White, price: "24.00", qty: 30}
+
+orders:
+  - name: "#1501"
+    created_at: "2026-10-01T09:00:00Z"
+    line_items:
+      - {title: Ribbed Tank, quantity: 1}
+      - {title: Pleated Trouser, quantity: 1}
+  - name: "#1502"
+    created_at: "2026-10-02T14:00:00Z"
+    line_items:
+      - {title: Everyday Tee, quantity: 1}
+      - {title: Pleated Trouser, quantity: 1}
+
+expect:
+  must_flag: ["gid://shopify/ProductVariant/1501"]
+  must_not_flag: ["gid://shopify/ProductVariant/1502", "gid://shopify/ProductVariant/1503"]

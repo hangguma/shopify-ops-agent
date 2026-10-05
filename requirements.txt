@@ -6,6 +6,7 @@ anthropic==0.105.2        # CrewAI Anthropic provider - required or LLM init fai
 requests>=2.32            # Shopify Admin GraphQL API calls
 python-dotenv==1.2.2      # matched to crewai's requirement (>=1.2.2,<2)
 pydantic==2.12.5
+pyyaml>=6.0             # evals: golden scenario files
 
 # [Phase 2] streamlit==1.58.0   # web UI + human-approval flow for write actions
 # [Phase 2] agentops==0.4.21    # observability dashboard + tracing
