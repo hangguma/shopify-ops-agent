@@ -3,15 +3,15 @@ Solver - runs the real Phase 1 crew against a scenario's fixed store snapshot.
 
 Why this design?
 - Only the network layer (_graphql_request) is replaced. Agent, task, prompt,
-  tools and output schema are the production ones, so the eval measures what
-  actually ships.
+  tools, output schema and enrichment are the production ones (run_analysis),
+  so the eval measures what actually ships.
 - One trial = one full crew run. The runner repeats trials because the same
   input can produce different reports.
 """
 
 from unittest.mock import patch
 
-from crew import build_crew
+from crew import run_analysis
 from evals.dataset import Scenario
 from models.schemas import AnalysisReport
 
@@ -29,15 +29,5 @@ def _fake_graphql(scenario: Scenario):
 
 def solve(scenario: Scenario) -> AnalysisReport:
     """Run the analyst crew once on the scenario and return its report."""
-    crew = build_crew()
-    crew.verbose = False
-    for agent in crew.agents:
-        agent.verbose = False
-
     with patch("tools.shopify_tool._graphql_request", side_effect=_fake_graphql(scenario)):
-        result = crew.kickoff()
-
-    report = getattr(result, "pydantic", None)
-    if not isinstance(report, AnalysisReport):
-        raise RuntimeError("Crew returned no structured AnalysisReport")
-    return report
+        return run_analysis(verbose=False)
