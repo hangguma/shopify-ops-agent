@@ -87,3 +87,22 @@ def test_fabricated_variant_and_wrong_qty_fail():
 def test_example_files_are_not_loaded():
     from evals.dataset import load_scenarios
     assert all(s.name != "format-example" for s in load_scenarios())
+
+
+def test_right_pick_with_garbled_id_is_a_fidelity_failure_only():
+    r = AnalysisReport(date="", markdown="", flagged_products=[
+        FlaggedProduct(title="Low (Default Title)", variant_id="<UNKNOWN>", reason="r", inventory_quantity=2),
+        FlaggedProduct(title="Slow", variant_id=SLOW, reason="r", inventory_quantity=40),
+    ])
+    result = score(make_scenario(), r)
+    assert result.judgment_passed
+    assert not result.fidelity_passed
+    assert any(f.startswith("wrong variant id") for f in result.fidelity_failures)
+
+
+def test_flag_outside_the_store_fails_both():
+    r = AnalysisReport(date="", markdown="", flagged_products=[
+        FlaggedProduct(title="Ghost Product", variant_id="<UNKNOWN>", reason="r", inventory_quantity=1),
+    ])
+    result = score(make_scenario(), r)
+    assert not result.judgment_passed and not result.fidelity_passed
