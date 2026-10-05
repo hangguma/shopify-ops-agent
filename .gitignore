@@ -11,3 +11,6 @@ venv/
 outputs/*.md
 outputs/logs/
 !outputs/.gitkeep
+
+# Eval run results
+outputs/evals/
