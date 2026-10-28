@@ -1,0 +1,29 @@
+# Format example only - never loaded (files starting with "_" are skipped).
+# Copy to e.g. 01_<short-name>.yaml and replace everything below.
+#
+# How the analyst sees this: get_products / get_orders return this snapshot
+# formatted exactly like the live Shopify tools. The low-stock threshold the
+# task prompt uses is settings.LOW_STOCK_THRESHOLD.
+
+name: format-example
+why: "One sentence: what wrong behavior would make this scenario fail?"
+
+products:
+  - title: Example Product A
+    status: ACTIVE            # ACTIVE | DRAFT | ARCHIVED
+    variants:
+      - id: gid://shopify/ProductVariant/9001
+        title: Default Title
+        price: "10.00"
+        qty: 1
+
+orders:
+  - name: "#9001"
+    created_at: "2026-10-01T10:00:00Z"
+    line_items:
+      - title: Example Product A   # must match a product title to count as a sale
+        quantity: 1
+
+expect:
+  must_flag: []        # variant GIDs the analyst has to flag
+  must_not_flag: []    # variant GIDs the analyst must leave alone

@@ -1,0 +1,29 @@
+name: sold-out-not-slow-mover
+why: "Agent checks only for missing orders and ignores that inventory is 0, so a sold-out product lands in the slow-mover list."
+
+products:
+  - title: Suede Loafer
+    variants:
+      - {id: "gid://shopify/ProductVariant/1401", title: 9 / Tan, price: "145.00", qty: 0}
+  - title: Leather Belt
+    variants:
+      - {id: "gid://shopify/ProductVariant/1402", title: 32 / Brown, price: "58.00", qty: 25}
+  - title: Everyday Tee
+    variants:
+      - {id: "gid://shopify/ProductVariant/1403", title: M / White, price: "24.00", qty: 30}
+
+orders:
+  - name: "#1401"
+    created_at: "2026-10-01T09:00:00Z"
+    line_items:
+      - {title: Everyday Tee, quantity: 1}
+  - name: "#1402"
+    created_at: "2026-10-02T14:00:00Z"
+    line_items:
+      - {title: Everyday Tee, quantity: 2}
+
+expect:
+  must_flag: ["gid://shopify/ProductVariant/1402"]       # real slow mover: stock 25, no orders
+  must_not_flag:
+    - "gid://shopify/ProductVariant/1401"               # sold out, no orders: not a slow mover
+    - "gid://shopify/ProductVariant/1403"

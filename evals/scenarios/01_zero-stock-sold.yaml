@@ -1,0 +1,25 @@
+name: zero-stock-sold
+why: "Agent reads inventory 0 as missing data and skips a product that is still selling."
+
+products:
+  - title: Linen Overshirt
+    variants:
+      - {id: "gid://shopify/ProductVariant/1101", title: M / Natural, price: "68.00", qty: 0}
+  - title: Everyday Tee
+    variants:
+      - {id: "gid://shopify/ProductVariant/1102", title: M / White, price: "24.00", qty: 30}
+
+orders:
+  - name: "#1101"
+    created_at: "2026-10-01T09:00:00Z"
+    line_items:
+      - {title: Linen Overshirt, quantity: 1}
+  - name: "#1102"
+    created_at: "2026-10-02T14:00:00Z"
+    line_items:
+      - {title: Everyday Tee, quantity: 2}
+      - {title: Linen Overshirt, quantity: 1}
+
+expect:
+  must_flag: ["gid://shopify/ProductVariant/1101"]
+  must_not_flag: ["gid://shopify/ProductVariant/1102"]

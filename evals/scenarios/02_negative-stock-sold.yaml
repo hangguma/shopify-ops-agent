@@ -1,0 +1,25 @@
+name: negative-stock-sold
+why: "Agent treats negative inventory (oversold, no cart reservation) as an outlier and drops it."
+
+products:
+  - title: Canvas Tote
+    variants:
+      - {id: "gid://shopify/ProductVariant/1201", title: One Size / Ecru, price: "38.00", qty: -2}
+  - title: Everyday Tee
+    variants:
+      - {id: "gid://shopify/ProductVariant/1202", title: M / White, price: "24.00", qty: 30}
+
+orders:
+  - name: "#1201"
+    created_at: "2026-10-01T09:00:00Z"
+    line_items:
+      - {title: Canvas Tote, quantity: 2}
+  - name: "#1202"
+    created_at: "2026-10-02T14:00:00Z"
+    line_items:
+      - {title: Everyday Tee, quantity: 1}
+      - {title: Canvas Tote, quantity: 1}
+
+expect:
+  must_flag: ["gid://shopify/ProductVariant/1201"]
+  must_not_flag: ["gid://shopify/ProductVariant/1202"]

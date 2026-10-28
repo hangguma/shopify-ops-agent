@@ -74,6 +74,37 @@ def _graphql_request(query: str, variables: dict | None = None) -> dict:
     return body["data"]
 
 
+PRODUCTS_QUERY = """
+query ($first: Int!) {
+  products(first: $first) {
+    edges {
+      node {
+        id
+        title
+        status
+        totalInventory
+        variants(first: 5) {
+          edges {
+            node {
+              id
+              title
+              price
+              inventoryQuantity
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def fetch_products(limit: int) -> list[dict]:
+    """Product edges (with variants) - shared by the tool and enrich.py."""
+    return _graphql_request(PRODUCTS_QUERY, {"first": limit})["products"]["edges"]
+
+
 class ShopifyProductsInput(BaseModel):
     limit: int = Field(default=20, description="Max number of products to fetch")
 
@@ -88,32 +119,7 @@ class ShopifyProductsTool(BaseTool):
     args_schema: type[BaseModel] = ShopifyProductsInput
 
     def _run(self, limit: int = 20) -> str:
-        query = """
-        query ($first: Int!) {
-          products(first: $first) {
-            edges {
-              node {
-                id
-                title
-                status
-                totalInventory
-                variants(first: 5) {
-                  edges {
-                    node {
-                      id
-                      title
-                      price
-                      inventoryQuantity
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-        """
-        data = _graphql_request(query, {"first": limit})
-        products = data["products"]["edges"]
+        products = fetch_products(limit)
         if not products:
             return "No products found in this store."
 
