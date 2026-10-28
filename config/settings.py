@@ -25,6 +25,8 @@ SHOPIFY_STORE_DOMAIN: str = os.getenv("SHOPIFY_STORE_DOMAIN", "")
 SHOPIFY_CLIENT_ID: str = os.getenv("SHOPIFY_CLIENT_ID", "")
 SHOPIFY_CLIENT_SECRET: str = os.getenv("SHOPIFY_CLIENT_SECRET", "")
 SHOPIFY_API_VERSION: str = os.getenv("SHOPIFY_API_VERSION", "2026-04")
+# Optional: skip the "Online Store" publication lookup during store setup.
+SHOPIFY_ONLINE_STORE_PUBLICATION_ID: str = os.getenv("SHOPIFY_ONLINE_STORE_PUBLICATION_ID", "")
 
 # -- LLM config -----------------------------------------------
 # CrewAI uses LiteLLM under the hood, hence the "anthropic/<model>" format.
@@ -37,6 +39,10 @@ LOW_STOCK_THRESHOLD: int = 5  # inventory_quantity at/below this = flagged
 
 # -- Output config --------------------------------------------
 OUTPUT_DIR: str = "outputs"
+
+# -- Store setup (Phase 2A) -----------------------------------
+STORE_PLAN_DIR: str = os.path.join(OUTPUT_DIR, "plans")
+AUDIT_LOG_PATH: str = os.path.join(OUTPUT_DIR, "audit_log.jsonl")
 
 
 def validate() -> None:

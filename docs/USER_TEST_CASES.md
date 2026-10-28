@@ -21,7 +21,7 @@
 | S-2 | 의존성 설치 | `pip install -r requirements.txt` | 오류 없이 설치 완료 | ✅ 7/15 (crewai 1.15.2 업그레이드 포함) |
 | S-3 | 키 파일 생성 | `cp .env.example .env` 후 4개 키 입력 (`ANTHROPIC_API_KEY`, `SHOPIFY_STORE_DOMAIN`, `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`) | `.env`에 네 값 모두 채워짐 | ✅ 7/15 (`settings.validate()` 통과) |
 | S-4 | Shopify 스토어 데이터 | Partner dev 스토어 admin에서 상품 5개 이상 등록 | 상품 목록에 5개 이상 표시 | ✅ 7/15 (상품 47·주문 20건, API count로 확인) |
-| S-5 | 자동 테스트 통과 | `pytest -v` | `20 passed` | ✅ 7/15 (`20 passed in 0.75s`) |
+| S-5 | 자동 테스트 통과 | `pytest -v` | `20 passed` (Phase 2A 이후 `61 passed`) | ✅ 7/15 (`20 passed in 0.75s`) |
 
 ---
 
@@ -154,6 +154,76 @@
 | 3 | 실행 후 사용량 증가분 확인 | 소액(보통 $0.05 이하) — 도구 호출 2회 + 분석 1회 수준 |
 
 > 초과 시 `agents/analyst.py`의 `max_iter`를 낮추거나 `PRODUCTS_LIMIT`/`ORDERS_LIMIT`을 줄이세요.
+
+**결과:** ☐  **비고:** ___________
+
+---
+
+## Phase 2A · 스토어 셋업 (setup_store.py)
+
+> 모든 케이스는 **dev 스토어**에서만 실행합니다. 실행 전 S-6을 먼저 끝내세요.
+
+| ID | 항목 | 명령 / 확인 | 기대 결과 | 결과 |
+|---|---|---|---|---|
+| S-6 | 쓰기 scope 추가 | Dev Dashboard → 앱 → Versions → 새 버전에 `write_products`, `write_content`, `read_online_store_navigation`, `write_online_store_navigation`, `read_publications`, `write_publications` 추가 → Release → 재설치 | 토큰 응답 `scope`에 6개가 추가로 보임 | ☐ |
+
+### TC-10 · 계획 생성 (Builder)
+
+| 단계 | 동작 | 기대 결과 |
+|---|---|---|
+| 1 | `python setup_store.py plan --brief briefs/example_brief.md` | `outputs/plans/store_plan_<오늘>.json` 생성, 요약에 "Problems" 없음 |
+| 2 | JSON 열어보기 | 컬렉션 2~4개, 브리프의 상품 5개, 페이지 4개(about/faq/shipping-returns/contact), 메인 메뉴 |
+| 3 | 내용 확인 | 브리프에 없는 효능·인증·후기 문구가 없음. 배송·반품은 브리프 내용 그대로 |
+| 4 | 승인 상태 | 모든 `approved`가 `false` |
+
+**결과:** ☐  **비고:** ___________
+
+### TC-11 · 리뷰 (승인 게이트)
+
+| 단계 | 동작 | 기대 결과 |
+|---|---|---|
+| 1 | `python setup_store.py review <plan.json>` | 항목마다 `Approve ...? [y/N]` 질문 |
+| 2 | 상품 1개만 `n`, 나머지 `y` | 요약에 products `4/5 approved` |
+| 3 | JSON 재확인 | 거절한 상품만 `approved: false` |
+
+**결과:** ☐  **비고:** ___________
+
+### TC-12 · Dry run (쓰기 없음)
+
+| 단계 | 동작 | 기대 결과 |
+|---|---|---|
+| 1 | `python setup_store.py apply <plan.json>` | `DRY RUN (no writes)` 표시, 결과가 `would_*`/`skipped`/`exists`만 |
+| 2 | Shopify admin 확인 | 상품·컬렉션·페이지·메뉴 변화 없음 |
+| 3 | `outputs/audit_log.jsonl` 확인 | 모든 줄이 `"dry_run": true` |
+
+**결과:** ☐  **비고:** ___________
+
+### TC-13 · 실제 적용 (Execute)
+
+| 단계 | 동작 | 기대 결과 |
+|---|---|---|
+| 1 | `python setup_store.py apply <plan.json> --execute` | `created`/`upserted`/`published`/`updated`, `error` 0건 |
+| 2 | admin → Products | 승인한 상품만 Active로 생성, 컬렉션 연결됨. TC-11에서 거절한 상품은 없음 |
+| 3 | admin → Online Store → Pages / Navigation | 페이지 4개 공개, Main menu가 계획한 순서로 교체됨 |
+| 4 | 스토어 프론트(비밀번호 입력 후) | 메뉴에서 컬렉션·페이지로 이동 가능, 상품이 컬렉션에 보임 |
+
+**결과:** ☐  **비고:** ___________
+
+### TC-14 · 재실행 (멱등성)
+
+| 단계 | 동작 | 기대 결과 |
+|---|---|---|
+| 1 | 같은 plan으로 `apply --execute` 한 번 더 | 컬렉션·페이지는 `exists`, 상품은 `upserted` |
+| 2 | admin 확인 | 상품·컬렉션·페이지가 중복 생성되지 않음 |
+
+**결과:** ☐  **비고:** ___________
+
+### TC-15 · scope 누락 (에러 경로)
+
+| 단계 | 동작 | 기대 결과 |
+|---|---|---|
+| 1 | S-6 전 상태(읽기 scope만)에서 `apply --execute` | 항목별 `error`로 기록되고 실행은 끝까지 진행, 종료 코드 1 |
+| 2 | 감사 로그 확인 | 실패 이유(권한 오류)가 `detail`에 남음 |
 
 **결과:** ☐  **비고:** ___________
 
