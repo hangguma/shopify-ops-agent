@@ -47,6 +47,17 @@ pytest -v
 | T-15 | `test_validate_errors_when_partial_keys` | 일부 키만 없을 때 메시지에 누락된 키만 정확히 언급되는가 (있는 키는 언급 안 함) |
 | T-16 | `test_save_report_creates_file` | `main.save_report()`가 실제로 `.md` 파일을 만들고 내용을 정확히 쓰는가 |
 
+## 스토어 세팅 (store setup) 테스트
+
+위 20개와 별도로 추가된 테스트 파일입니다. 마찬가지로 전부 mock이라 실제
+스토어에는 아무것도 쓰지 않습니다.
+
+| 파일 | 무엇을 검증하는가 |
+|---|---|
+| `tests/test_store_plan.py` | brief 검증(중복 key, slug 형식, 세트 구성, 가격), 모델이 쓴 HTML 정리, 태그 정규화, 사실 값(상품명·가격·브랜드)은 brief에서만 오는지, 문구 누락·의학적 표현 시 `needs_review` 처리, plan 파일 저장/로드 |
+| `tests/test_executor.py` | 상품이 항상 DRAFT로 handle 기준 upsert되는지, 컬렉션이 이미 있으면 다시 만들지 않는지, Shopify `userErrors`가 에러로 드러나는지, `needs_review`가 있으면 쓰기 전에 전체 거부되는지, 첫 실패에서 멈추고 나머지를 skipped로 기록하는지, audit 로그 |
+| `tests/test_setup_store.py` | `apply`가 `apply`를 직접 입력하지 않으면 아무것도 쓰지 않는지, 실패 시 종료 코드, 모델에게 주는 프롬프트에 가격이 들어가지 않는지 |
+
 ---
 
 ## 자동 vs 수동 테스트 역할 분담

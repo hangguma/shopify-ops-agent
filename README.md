@@ -15,6 +15,9 @@ development store instead.
 - **Phase 2:** executor agent (write actions) with an approval flow, audit log
   and Streamlit dashboard. Designed, not built
 - **Phase 3 (stretch):** scheduled monitoring and alerts
+- **Store setup (new, not yet run against a live store):** turn a short
+  product brief into draft products and a collection, behind a typed
+  approval. See [Store setup](#store-setup)
 
 ## Setup
 
@@ -62,6 +65,48 @@ main.py      CLI entry point (replaced by app.py / Streamlit in Phase 2)
 Phase 2 adds write tools (e.g. `update_price`) to `tools/` and an
 `executor.py` to `agents/`. The existing read-only analysis logic is reused
 as-is.
+
+## Store setup
+
+Sets up a store from a few lines per product. Two commands, with a person in
+between:
+
+```
+python setup_store.py plan                                  # calls the model, writes nothing
+python setup_store.py apply outputs/store_plan_<date>.json  # no model, writes drafts
+```
+
+1. **Brief** (`store_brief.yaml`): product titles, one-line descriptions,
+   prices and vendors. This file is the source of every fact.
+2. **Plan**: the planner agent writes only the copy (description, product
+   type, tags). `store_plan.py` merges it with the brief's facts, reduces the
+   HTML to a small allowlist, and marks a product `needs_review` if the model
+   returned no copy for it or the copy makes a medical-sounding claim. The
+   result is saved as `outputs/store_plan_<date>.json` and `.md`.
+3. **Approval**: read the `.md`, edit the `.json` if you want changes.
+   `apply` prints the plan again and writes only after you type `apply`.
+   There is no flag to skip this. A plan with any `needs_review` product is
+   refused.
+4. **Apply** (`executor.py`, code, not an agent): each product is upserted by
+   its handle as a **draft**, then a collection is created that includes
+   everything tagged with the brief's `store_tag`. The collection is
+   unpublished. Every step is appended to `outputs/setup_audit_<date>.jsonl`.
+
+Running `apply` twice does not create duplicates: products are matched by
+handle and an existing collection is left alone. A re-run does overwrite
+manual edits to the fields it sets (title, description, vendor, type, tags,
+price, status).
+
+Before the first `apply`, add the `write_products` scope to the app (Dev
+Dashboard → Versions → Release) and approve the update on the store.
+
+Limits for now: one variant per product, no images, no inventory quantities,
+and a set is a plain product (not a Shopify bundle). The collection mutation
+uses the `ruleSet` form, which API version 2026-07 deprecates in favour of
+`sources`; migrate when `SHOPIFY_API_VERSION` is raised.
+
+New files: `store_brief.yaml`, `store_plan.py`, `executor.py`,
+`setup_store.py`, `agents/planner.py`.
 
 ## Evals
 

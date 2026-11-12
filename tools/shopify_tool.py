@@ -12,6 +12,9 @@ Why this design?
 - Auth uses the client credentials grant (Dev Dashboard apps have no static
   admin token). Tokens expire after ~24h, so _get_access_token caches the
   token in-process and re-exchanges credentials shortly before expiry.
+- Store-setup writes (upsert_product, ensure_collection, at the bottom) are
+  plain functions, not CrewAI tools: no agent is ever handed a write tool.
+  Only executor.py calls them, after a person has approved the plan.
 """
 
 import time
@@ -183,3 +186,92 @@ class ShopifyOrdersTool(BaseTool):
                 li = li_edge["node"]
                 lines.append(f"    item: {li['title']} x{li['quantity']}")
         return "\n".join(lines)
+
+
+# -- Store-setup writes (called by executor.py only) ----------------------
+# Needs the `write_products` access scope. Mutations report bad input as
+# `userErrors` with HTTP 200, so those are raised here like GraphQL errors.
+
+class ShopifyUserError(RuntimeError):
+    """A mutation was rejected by Shopify (payload.userErrors was not empty)."""
+
+
+def _raise_user_errors(payload: dict, what: str) -> None:
+    errors = payload.get("userErrors") or []
+    if errors:
+        detail = "; ".join(f"{e.get('field')}: {e.get('message')}" for e in errors)
+        raise ShopifyUserError(f"{what} rejected: {detail}")
+
+
+# productSet with identifier.handle is an upsert: it creates the product if
+# no product has that handle and otherwise sets the existing one to exactly
+# this input, so running the setup twice does not create duplicates. It also
+# means a re-run overwrites manual edits to these fields.
+PRODUCT_SET_MUTATION = """
+mutation ($identifier: ProductSetIdentifiers, $input: ProductSetInput!) {
+  productSet(identifier: $identifier, input: $input, synchronous: true) {
+    product { id handle title status }
+    userErrors { field message }
+  }
+}
+"""
+
+
+def upsert_product(product_input: dict) -> dict:
+    """Create or update one product by its handle. Returns {id, handle, title, status}."""
+    data = _graphql_request(
+        PRODUCT_SET_MUTATION,
+        {"identifier": {"handle": product_input["handle"]}, "input": product_input},
+    )
+    payload = data["productSet"]
+    _raise_user_errors(payload, f"productSet({product_input['handle']})")
+    return payload["product"]
+
+
+COLLECTION_BY_HANDLE_QUERY = """
+query ($handle: String!) {
+  collectionByHandle(handle: $handle) { id handle title }
+}
+"""
+
+# collectionCreate has no upsert, so ensure_collection looks the handle up
+# first. This is the `input` + `ruleSet` form, which is the only one in API
+# version 2026-04. From 2026-07 it is deprecated in favour of
+# `collection` + `sources`; migrate when SHOPIFY_API_VERSION is raised.
+COLLECTION_CREATE_MUTATION = """
+mutation ($input: CollectionInput!) {
+  collectionCreate(input: $input) {
+    collection { id handle title }
+    userErrors { field message }
+  }
+}
+"""
+
+
+def ensure_collection(handle: str, title: str, description_html: str, tag: str) -> tuple[dict, bool]:
+    """Return (collection, created). The collection holds every product tagged `tag`.
+
+    An existing collection with this handle is left untouched. New
+    collections are unpublished by default.
+    """
+    existing = _graphql_request(COLLECTION_BY_HANDLE_QUERY, {"handle": handle})["collectionByHandle"]
+    if existing:
+        return existing, False
+
+    data = _graphql_request(
+        COLLECTION_CREATE_MUTATION,
+        {
+            "input": {
+                "handle": handle,
+                "title": title,
+                "descriptionHtml": description_html,
+                "ruleSet": {
+                    "appliedDisjunctively": False,
+                    "rules": [{"column": "TAG", "relation": "EQUALS", "condition": tag}],
+                },
+            }
+        },
+    )
+    payload = data["collectionCreate"]
+    _raise_user_errors(payload, f"collectionCreate({handle})")
+    return payload["collection"], True
