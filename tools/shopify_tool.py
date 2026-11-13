@@ -9,73 +9,17 @@ Why this design?
   separate "get_inventory" call would just repeat this one.
 - Phase 2 (write tool: update_inventory; price/discount cut for cost of error) will live in this
   same module, sharing _graphql_request.
-- Auth uses the client credentials grant (Dev Dashboard apps have no static
-  admin token). Tokens expire after ~24h, so _get_access_token caches the
-  token in-process and re-exchanges credentials shortly before expiry.
-- Store-setup writes (upsert_product, ensure_collection, at the bottom) are
-  plain functions, not CrewAI tools: no agent is ever handed a write tool.
-  Only executor.py calls them, after a person has approved the plan.
+- Auth and `_graphql_request` live in tools/shopify_client.py, shared with
+  the store-setup writes in tools/shopify_write.py. Those writes are plain
+  functions, not CrewAI tools: no agent is ever handed a write tool.
 """
 
-import time
-
-import requests
+import requests  # noqa: F401 - tests patch tools.shopify_tool.requests.post
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 
-from config import settings
-
-# Refresh this many seconds before the token's reported expiry.
-_TOKEN_REFRESH_MARGIN = 60
-
-_token_cache: dict = {"access_token": None, "expires_at": 0.0}
-
-
-def _get_access_token() -> str:
-    """Return a valid Admin API access token, exchanging credentials if needed."""
-    if _token_cache["access_token"] and time.time() < _token_cache["expires_at"]:
-        return _token_cache["access_token"]
-
-    resp = requests.post(
-        f"https://{settings.SHOPIFY_STORE_DOMAIN}/admin/oauth/access_token",
-        data={
-            "grant_type": "client_credentials",
-            "client_id": settings.SHOPIFY_CLIENT_ID,
-            "client_secret": settings.SHOPIFY_CLIENT_SECRET,
-        },
-        timeout=30,
-    )
-    resp.raise_for_status()
-    body = resp.json()
-    if "access_token" not in body:
-        raise RuntimeError(f"Shopify token exchange failed: {body}")
-
-    _token_cache["access_token"] = body["access_token"]
-    _token_cache["expires_at"] = (
-        time.time() + body.get("expires_in", 86400) - _TOKEN_REFRESH_MARGIN
-    )
-    return _token_cache["access_token"]
-
-
-def _graphql_request(query: str, variables: dict | None = None) -> dict:
-    """POST a query to the Shopify Admin GraphQL API and return `data`."""
-    url = (
-        f"https://{settings.SHOPIFY_STORE_DOMAIN}/admin/api/"
-        f"{settings.SHOPIFY_API_VERSION}/graphql.json"
-    )
-    headers = {
-        "X-Shopify-Access-Token": _get_access_token(),
-        "Content-Type": "application/json",
-    }
-    resp = requests.post(
-        url, json={"query": query, "variables": variables or {}}, headers=headers, timeout=30
-    )
-    resp.raise_for_status()
-    body = resp.json()
-    if "errors" in body:
-        raise RuntimeError(f"Shopify GraphQL error: {body['errors']}")
-    return body["data"]
-
+# Re-exported so existing callers and tests can keep using this module's names.
+from tools.shopify_client import _get_access_token, _graphql_request, _token_cache  # noqa: F401
 
 PRODUCTS_QUERY = """
 query ($first: Int!) {
@@ -186,92 +130,3 @@ class ShopifyOrdersTool(BaseTool):
                 li = li_edge["node"]
                 lines.append(f"    item: {li['title']} x{li['quantity']}")
         return "\n".join(lines)
-
-
-# -- Store-setup writes (called by executor.py only) ----------------------
-# Needs the `write_products` access scope. Mutations report bad input as
-# `userErrors` with HTTP 200, so those are raised here like GraphQL errors.
-
-class ShopifyUserError(RuntimeError):
-    """A mutation was rejected by Shopify (payload.userErrors was not empty)."""
-
-
-def _raise_user_errors(payload: dict, what: str) -> None:
-    errors = payload.get("userErrors") or []
-    if errors:
-        detail = "; ".join(f"{e.get('field')}: {e.get('message')}" for e in errors)
-        raise ShopifyUserError(f"{what} rejected: {detail}")
-
-
-# productSet with identifier.handle is an upsert: it creates the product if
-# no product has that handle and otherwise sets the existing one to exactly
-# this input, so running the setup twice does not create duplicates. It also
-# means a re-run overwrites manual edits to these fields.
-PRODUCT_SET_MUTATION = """
-mutation ($identifier: ProductSetIdentifiers, $input: ProductSetInput!) {
-  productSet(identifier: $identifier, input: $input, synchronous: true) {
-    product { id handle title status }
-    userErrors { field message }
-  }
-}
-"""
-
-
-def upsert_product(product_input: dict) -> dict:
-    """Create or update one product by its handle. Returns {id, handle, title, status}."""
-    data = _graphql_request(
-        PRODUCT_SET_MUTATION,
-        {"identifier": {"handle": product_input["handle"]}, "input": product_input},
-    )
-    payload = data["productSet"]
-    _raise_user_errors(payload, f"productSet({product_input['handle']})")
-    return payload["product"]
-
-
-COLLECTION_BY_HANDLE_QUERY = """
-query ($handle: String!) {
-  collectionByHandle(handle: $handle) { id handle title }
-}
-"""
-
-# collectionCreate has no upsert, so ensure_collection looks the handle up
-# first. This is the `input` + `ruleSet` form, which is the only one in API
-# version 2026-04. From 2026-07 it is deprecated in favour of
-# `collection` + `sources`; migrate when SHOPIFY_API_VERSION is raised.
-COLLECTION_CREATE_MUTATION = """
-mutation ($input: CollectionInput!) {
-  collectionCreate(input: $input) {
-    collection { id handle title }
-    userErrors { field message }
-  }
-}
-"""
-
-
-def ensure_collection(handle: str, title: str, description_html: str, tag: str) -> tuple[dict, bool]:
-    """Return (collection, created). The collection holds every product tagged `tag`.
-
-    An existing collection with this handle is left untouched. New
-    collections are unpublished by default.
-    """
-    existing = _graphql_request(COLLECTION_BY_HANDLE_QUERY, {"handle": handle})["collectionByHandle"]
-    if existing:
-        return existing, False
-
-    data = _graphql_request(
-        COLLECTION_CREATE_MUTATION,
-        {
-            "input": {
-                "handle": handle,
-                "title": title,
-                "descriptionHtml": description_html,
-                "ruleSet": {
-                    "appliedDisjunctively": False,
-                    "rules": [{"column": "TAG", "relation": "EQUALS", "condition": tag}],
-                },
-            }
-        },
-    )
-    payload = data["collectionCreate"]
-    _raise_user_errors(payload, f"collectionCreate({handle})")
-    return payload["collection"], True

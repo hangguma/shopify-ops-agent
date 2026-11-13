@@ -13,9 +13,12 @@ from pydantic import ValidationError
 from models.schemas import PlannedCopy, PlannerOutput, StoreBrief
 from store_plan import (
     build_plan,
+    clean_html,
+    find_claim,
     load_brief,
     load_plan,
     normalize_tags,
+    plan_problems,
     render_markdown,
     sanitize_html,
     save_plan,
@@ -98,6 +101,14 @@ def test_brief_rejects_zero_or_negative_price():
         StoreBrief.model_validate(d)
 
 
+def test_brief_rejects_price_with_more_than_two_decimals():
+    # 19.999 would be shown as 20.00 on the approval screen but sent as 19.999.
+    d = brief_dict()
+    d["products"][0]["price"] = "19.999"
+    with pytest.raises(ValidationError, match="decimal"):
+        StoreBrief.model_validate(d)
+
+
 # -- sanitize_html / normalize_tags ---------------------------------------
 
 def test_sanitize_keeps_allowlisted_tags_and_drops_attributes():
@@ -114,6 +125,35 @@ def test_sanitize_escapes_text_and_handles_empty():
     assert sanitize_html("<p>5 &lt; 6 & more</p>") == "<p>5 &lt; 6 &amp; more</p>"
     assert sanitize_html("") == ""
     assert sanitize_html(None) == ""
+
+
+def test_void_embed_does_not_swallow_the_rest_of_the_description():
+    out, truncated = clean_html("<p>Intro.</p><embed src=x><ul><li>Feature</li></ul>")
+    assert out == "<p>Intro.</p><ul><li>Feature</li></ul>"
+    assert not truncated
+
+
+def test_unclosed_script_is_reported_as_truncated():
+    out, truncated = clean_html("<p>Intro.</p><script>var x = 1;<p>Lost text</p>")
+    assert out == "<p>Intro.</p>"
+    assert truncated
+
+
+@pytest.mark.parametrize("text", [
+    "Helps treat acne.", "Prevents breakouts.", "Great for acne-prone skin.",
+    "clinically <strong>proven</strong> results", "Clinically-proven glow", "clinically\n  proven",
+    "Heals overnight", "FDA approved",
+])
+def test_claim_words_are_found(text):
+    assert find_claim(text)
+
+
+@pytest.mark.parametrize("text", [
+    "A gentle treatment essence for a glowy look.", "Melts makeup and sunscreen.",
+    "Leaves skin looking plump.", "A secure, curated routine.",
+])
+def test_ordinary_cosmetic_copy_is_not_flagged(text):
+    assert find_claim(text) is None
 
 
 def test_normalize_tags_puts_required_first_and_dedupes():
@@ -174,6 +214,82 @@ def test_description_that_is_empty_after_cleaning_is_marked_for_review():
     assert "empty" in plan.products[0].review_reason
 
 
+def test_truncated_description_is_marked_for_review():
+    plan = build_plan(BRIEF, copy_for("oil", "balm", "set", html="<p>Intro.</p><script>x<p>lost</p>"))
+    assert plan.products[0].needs_review
+    assert "unclosed" in plan.products[0].review_reason
+
+
+def test_claim_in_tags_or_product_type_marks_product_for_review():
+    copy = copy_for("oil", "balm", "set")
+    copy.products[0].tags = ["glow", "acne care"]
+    copy.products[1].product_type = "Eczema Cream"
+    plan = build_plan(BRIEF, copy)
+
+    assert "tags" in plan.products[0].review_reason
+    assert "product type" in plan.products[1].review_reason
+    assert not plan.products[2].needs_review
+
+
+def test_claim_in_collection_description_marks_collection_for_review():
+    copy = copy_for("oil", "balm", "set")
+    copy.collection_description_html = "<p>A routine that prevents breakouts.</p>"
+    plan = build_plan(BRIEF, copy)
+
+    assert plan.collection.needs_review and "prevents" in plan.collection.review_reason
+    assert any(p.startswith("collection: marked needs_review") for p in plan_problems(plan))
+
+
+# -- plan_problems: the checks that run again on the (possibly edited) file --
+
+def good_plan():
+    return build_plan(BRIEF, copy_for("oil", "balm", "set"), today="2026-11-12")
+
+
+def test_clean_plan_has_no_problems():
+    assert plan_problems(good_plan()) == []
+
+
+def test_needs_review_flag_is_a_problem():
+    plan = build_plan(BRIEF, copy_for("oil", "set"))
+    assert any(p.startswith("balm: marked needs_review") for p in plan_problems(plan))
+
+
+def test_edited_html_is_checked_again():
+    plan = good_plan()
+    plan.products[0].description_html = '<p onclick="x()">Hi</p><script>alert(1)</script>'
+    assert any("oil: description contains HTML that is not allowed" in p for p in plan_problems(plan))
+
+
+def test_claim_cannot_be_cleared_by_flipping_the_flag():
+    plan = build_plan(BRIEF, copy_for("oil", "balm", "set", html="<p>Heals acne overnight.</p>"))
+    for p in plan.products:  # a person sets needs_review to false without rewording
+        p.needs_review = False
+    problems = plan_problems(plan)
+    assert any("oil: description contains a medical-sounding claim" in p for p in problems)
+
+
+def test_edited_handle_tags_and_duplicates_are_caught():
+    plan = good_plan()
+    plan.products[0].handle = "Bad Handle"
+    plan.products[1].tags = ["glow"]          # store tag removed -> would miss the collection
+    plan.products[2].handle = "balm"          # same handle as products[1]
+    problems = "\n".join(plan_problems(plan))
+
+    assert "oil: handle 'Bad Handle' must be lowercase" in problems
+    assert "balm: tags must include 'demo-tag'" in problems
+    assert "balm: handle is used by more than one product" in problems
+
+
+def test_plan_file_rejects_bad_price(tmp_path):
+    plan = good_plan()
+    data = plan.model_dump(mode="json")
+    for bad in ("0", "-5", "19.999"):
+        data["products"][0]["price"] = bad
+        with pytest.raises(ValidationError):
+            type(plan).model_validate(data)
+
+
 # -- render / save / load ---------------------------------------------------
 
 def test_markdown_shows_facts_and_review_flags():
@@ -183,7 +299,7 @@ def test_markdown_shows_facts_and_review_flags():
     assert "# Store setup plan (2026-11-12)" in md
     assert "price: 20.00" in md
     assert "### Multi Balm  **NEEDS REVIEW**" in md
-    assert "**draft**" in md
+    assert "**drafts**" in md
 
 
 def test_plan_round_trips_through_json_file(tmp_path):
@@ -194,3 +310,19 @@ def test_plan_round_trips_through_json_file(tmp_path):
 
     assert json_path.endswith("store_plan_2026-11-12.json") and md_path.endswith(".md")
     assert load_plan(json_path) == plan
+
+
+def test_save_plan_does_not_overwrite_an_existing_plan(tmp_path):
+    plan = good_plan()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(settings, "OUTPUT_DIR", str(tmp_path))
+        json_path, _ = save_plan(plan)
+        edited = open(json_path, encoding="utf-8").read().replace("Nice.", "Edited by a person.")
+        open(json_path, "w", encoding="utf-8").write(edited)
+
+        with pytest.raises(FileExistsError):
+            save_plan(plan)
+        assert "Edited by a person." in open(json_path, encoding="utf-8").read()
+
+        save_plan(plan, overwrite=True)
+        assert "Edited by a person." not in open(json_path, encoding="utf-8").read()

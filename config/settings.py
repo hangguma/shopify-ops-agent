@@ -20,7 +20,7 @@ ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 # -- Shopify Admin API ------------------------------------------
 # Dev Dashboard apps don't expose a static admin token (the old shpat_
 # flow was retired). We hold client credentials and exchange them for a
-# short-lived access token at runtime (see tools/shopify_tool.py).
+# short-lived access token at runtime (see tools/shopify_client.py).
 SHOPIFY_STORE_DOMAIN: str = os.getenv("SHOPIFY_STORE_DOMAIN", "")
 SHOPIFY_CLIENT_ID: str = os.getenv("SHOPIFY_CLIENT_ID", "")
 SHOPIFY_CLIENT_SECRET: str = os.getenv("SHOPIFY_CLIENT_SECRET", "")
@@ -39,10 +39,14 @@ LOW_STOCK_THRESHOLD: int = 5  # inventory_quantity at/below this = flagged
 OUTPUT_DIR: str = "outputs"
 
 
-def validate() -> None:
-    """Check required API keys/config are set before running."""
+def validate(llm: bool = True) -> None:
+    """Check required API keys/config are set before running.
+
+    Pass llm=False for runs that never call a model (setup_store.py apply),
+    so they do not demand ANTHROPIC_API_KEY.
+    """
     missing = []
-    if not ANTHROPIC_API_KEY:
+    if llm and not ANTHROPIC_API_KEY:
         missing.append("ANTHROPIC_API_KEY")
     if not SHOPIFY_STORE_DOMAIN:
         missing.append("SHOPIFY_STORE_DOMAIN")

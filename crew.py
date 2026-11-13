@@ -47,7 +47,7 @@ def run_analysis(verbose: bool = True) -> AnalysisReport:
     return enrich(output, fetch_products(settings.PRODUCTS_LIMIT))
 
 
-def run_planning(brief: StoreBrief, verbose: bool = True) -> StorePlan:
+def run_planning(brief: StoreBrief, verbose: bool = True, today: str | None = None) -> StorePlan:
     """Run the planner (copy only, no tools), then merge its copy with brief facts.
 
     This never touches the store: the plan is applied separately by
@@ -64,4 +64,4 @@ def run_planning(brief: StoreBrief, verbose: bool = True) -> StorePlan:
     output = getattr(result, "pydantic", None)
     if not isinstance(output, PlannerOutput):
         raise RuntimeError("Crew returned no structured PlannerOutput")
-    return build_plan(brief, output)
+    return build_plan(brief, output, today=today)

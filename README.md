@@ -53,7 +53,7 @@ development store instead.
 ```
 config/      settings + logging (settings.py, logging_setup.py)
 models/      I/O contracts between agents (Pydantic schemas)
-tools/       Shopify Admin API wrapped as CrewAI tools (currently read-only)
+tools/       Shopify Admin API: client, read tools for agents, store-setup writes
 agents/      agent definitions (currently analyst only)
 tasks/       task definitions assigned to agents
 enrich.py    fills variant IDs and quantities from store data (see Evals)
@@ -73,29 +73,48 @@ between:
 
 ```
 python setup_store.py plan                                  # calls the model, writes nothing
-python setup_store.py apply outputs/store_plan_<date>.json  # no model, writes drafts
+python setup_store.py apply outputs/store_plan_<date>.json  # no model, writes to the store
 ```
 
 1. **Brief** (`store_brief.yaml`): product titles, one-line descriptions,
-   prices and vendors. This file is the source of every fact.
+   prices (at most two decimals) and vendors. This file is the source of
+   every fact.
 2. **Plan**: the planner agent writes only the copy (description, product
    type, tags). `store_plan.py` merges it with the brief's facts, reduces the
-   HTML to a small allowlist, and marks a product `needs_review` if the model
-   returned no copy for it or the copy makes a medical-sounding claim. The
-   result is saved as `outputs/store_plan_<date>.json` and `.md`.
-3. **Approval**: read the `.md`, edit the `.json` if you want changes.
-   `apply` prints the plan again and writes only after you type `apply`.
-   There is no flag to skip this. A plan with any `needs_review` product is
-   refused.
-4. **Apply** (`executor.py`, code, not an agent): each product is upserted by
-   its handle as a **draft**, then a collection is created that includes
-   everything tagged with the brief's `store_tag`. The collection is
-   unpublished. Every step is appended to `outputs/setup_audit_<date>.jsonl`.
+   HTML to a small allowlist, and marks a product or the collection
+   `needs_review` if copy is missing, was cut off, or uses a medical-sounding
+   word (cure, heal, treat, prevent, acne, clinically proven, ...) in any
+   model-written field. The result is saved as
+   `outputs/store_plan_<date>.json` and `.md`. `plan` will not replace an
+   existing plan file for the same day unless you pass `--overwrite`.
+3. **Approval**: read the `.md`, edit the `.json` if you want changes. The
+   edited file is checked again with the same rules: HTML outside the
+   allowlist, a claim word, a bad handle, a bad price, or a product that has
+   lost the store tag all stop `apply` before it asks you anything. A claim
+   word is cleared by rewording the copy, not by setting `needs_review` to
+   false. When the plan is clean, `apply` prints it and writes only after you
+   type `apply`. There is no flag to skip this.
+4. **Apply** (`executor.py`, code, not an agent): each product is looked up
+   by its handle, then created as a **draft** or updated. Then a collection
+   is created that includes everything tagged with the brief's `store_tag`.
+   The collection is unpublished. Every step is appended to
+   `outputs/setup_audit_<date>.jsonl`. `apply` does not call the model and
+   does not need `ANTHROPIC_API_KEY`.
 
-Running `apply` twice does not create duplicates: products are matched by
-handle and an existing collection is left alone. A re-run does overwrite
-manual edits to the fields it sets (title, description, vendor, type, tags,
-price, status).
+What running `apply` again does:
+
+- A product this setup created (it carries `store_tag`) is updated. Its
+  **status is left alone**, so a product you have published stays published.
+  Its title, description, vendor, type, tags, options, variants and price are
+  set back to the plan, so changes made to those in the Shopify admin are
+  lost.
+- A product with the same handle that does **not** carry `store_tag` was not
+  made by this setup. It is never written; the run stops with an error.
+- An existing collection is accepted, and left as it is, only if its single
+  rule is "tag equals `store_tag`". Any other collection with that handle
+  stops the run, because the new products would not be in it.
+- The run stops at the first error. Steps already marked `ok` in the audit
+  log were written.
 
 Before the first `apply`, add the `write_products` scope to the app (Dev
 Dashboard → Versions → Release) and approve the update on the store.
@@ -106,7 +125,8 @@ uses the `ruleSet` form, which API version 2026-07 deprecates in favour of
 `sources`; migrate when `SHOPIFY_API_VERSION` is raised.
 
 New files: `store_brief.yaml`, `store_plan.py`, `executor.py`,
-`setup_store.py`, `agents/planner.py`.
+`setup_store.py`, `agents/planner.py`, `tools/shopify_client.py` (auth and
+request helper, moved out of `shopify_tool.py`), `tools/shopify_write.py`.
 
 ## Evals
 

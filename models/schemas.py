@@ -70,7 +70,7 @@ class BriefProduct(BaseModel):
     key: str = Field(description="Slug, unique in the brief; becomes the Shopify handle")
     title: str = Field(min_length=1)
     one_liner: str = Field(min_length=1, description="What the product is, in the seller's words")
-    price: Decimal = Field(gt=0)
+    price: Decimal = Field(gt=0, decimal_places=2, description="At most 2 decimals, so shown == sent")
     vendor: str = Field(min_length=1)
     bundle_of: list[str] = Field(default_factory=list, description="Keys of the products in this set")
 
@@ -125,7 +125,7 @@ class PlannedProduct(BaseModel):
     handle: str
     title: str
     vendor: str
-    price: Decimal
+    price: Decimal = Field(gt=0, decimal_places=2)
     product_type: str
     description_html: str
     tags: list[str]
@@ -138,6 +138,8 @@ class PlannedCollection(BaseModel):
     title: str
     description_html: str
     tag: str = Field(description="Products carrying this tag are in the collection")
+    needs_review: bool = Field(default=False, description="True blocks apply until a person fixes the plan")
+    review_reason: str = ""
 
 
 class StorePlan(BaseModel):
