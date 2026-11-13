@@ -1,0 +1,41 @@
+# Store brief - the seller's input for `python setup_store.py plan`.
+#
+# Everything factual comes from this file: titles, prices and vendors are
+# copied by code, never written by the model. The model only writes the
+# descriptions, product types and tags.
+#
+# Prices below are SAMPLE values for the development store - replace them
+# with your real prices before selling anything.
+
+store_tag: haenggoguma-demo
+collection_key: k-beauty-glow-routine
+collection_title: K-Beauty Glow Routine
+
+products:
+  - key: medicube-pdrn-pink-collagen-multi-balm
+    title: medicube PDRN Pink Collagen Volume Multi Balm
+    one_liner: A stick balm with PDRN and collagen for a glowy, plump look on face, eye area and neck.
+    price: 25.00   # sample
+    vendor: medicube
+
+  - key: biodance-pdrn-real-deep-mask
+    title: BIODANCE PDRN Real Deep Mask
+    one_liner: An overnight hydrogel sheet mask with PDRN that turns transparent as the essence absorbs.
+    price: 19.00   # sample
+    vendor: BIODANCE
+
+  - key: anua-heartleaf-pore-control-cleansing-oil
+    title: Anua Heartleaf Pore Control Cleansing Oil
+    one_liner: A gentle cleansing oil with heartleaf extract that melts makeup and sunscreen.
+    price: 20.00   # sample
+    vendor: Anua
+
+  - key: glow-routine-set
+    title: Glow Routine Set (Cleanse, Balm, Mask)
+    one_liner: The three-step routine in one set - cleansing oil, multi balm and deep mask.
+    price: 58.00   # sample
+    vendor: Haenggoguma
+    bundle_of:
+      - anua-heartleaf-pore-control-cleansing-oil
+      - medicube-pdrn-pink-collagen-multi-balm
+      - biodance-pdrn-real-deep-mask

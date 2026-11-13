@@ -9,6 +9,8 @@ venv/
 
 # 생성물 (선택적으로 커밋 — 데모용으로는 1개 남겨두면 좋음)
 outputs/*.md
+outputs/store_plan_*.json
+outputs/setup_audit_*.jsonl
 outputs/logs/
 !outputs/.gitkeep
 

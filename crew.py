@@ -10,10 +10,12 @@ Why separate this from main.py?
 from crewai import Crew, Process
 
 from agents.analyst import build_analyst
+from agents.planner import build_planner
 from config import settings
 from enrich import enrich
-from models.schemas import AnalysisReport, AnalystOutput
-from tasks.tasks import build_analysis_task
+from models.schemas import AnalysisReport, AnalystOutput, PlannerOutput, StoreBrief, StorePlan
+from store_plan import build_plan
+from tasks.tasks import build_analysis_task, build_planning_task
 from tools.shopify_tool import fetch_products
 
 
@@ -43,3 +45,23 @@ def run_analysis(verbose: bool = True) -> AnalysisReport:
     if not isinstance(output, AnalystOutput):
         raise RuntimeError("Crew returned no structured AnalystOutput")
     return enrich(output, fetch_products(settings.PRODUCTS_LIMIT))
+
+
+def run_planning(brief: StoreBrief, verbose: bool = True, today: str | None = None) -> StorePlan:
+    """Run the planner (copy only, no tools), then merge its copy with brief facts.
+
+    This never touches the store: the plan is applied separately by
+    executor.py after a person approves it.
+    """
+    planner = build_planner(verbose=verbose)
+    crew = Crew(
+        agents=[planner],
+        tasks=[build_planning_task(planner, brief)],
+        process=Process.sequential,
+        verbose=verbose,
+    )
+    result = crew.kickoff()
+    output = getattr(result, "pydantic", None)
+    if not isinstance(output, PlannerOutput):
+        raise RuntimeError("Crew returned no structured PlannerOutput")
+    return build_plan(brief, output, today=today)

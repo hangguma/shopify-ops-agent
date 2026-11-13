@@ -47,6 +47,17 @@ pytest -v
 | T-15 | `test_validate_errors_when_partial_keys` | 일부 키만 없을 때 메시지에 누락된 키만 정확히 언급되는가 (있는 키는 언급 안 함) |
 | T-16 | `test_save_report_creates_file` | `main.save_report()`가 실제로 `.md` 파일을 만들고 내용을 정확히 쓰는가 |
 
+## 스토어 세팅 (store setup) 테스트
+
+위 20개와 별도로 추가된 테스트 파일입니다. 마찬가지로 전부 mock이라 실제
+스토어에는 아무것도 쓰지 않습니다.
+
+| 파일 | 무엇을 검증하는가 |
+|---|---|
+| `tests/test_store_plan.py` | brief 검증(중복 key, slug 형식, 세트 구성, 가격 소수 둘째 자리까지), 모델이 쓴 HTML 정리(`<embed>` 뒤 내용 보존, 닫히지 않은 `<script>` 감지), 태그 정규화, 사실 값(상품명·가격·브랜드)은 brief에서만 오는지, 문구 누락·의학적 주장(설명·카테고리·태그·컬렉션 설명 전부) 시 `needs_review` 처리, 흔한 화장품 표현(prevent, treat, acne 단독)은 막지 않고 경고만 하는지, `<br/>`·`&nbsp;` 같은 무해한 수정은 통과하고 금지된 태그·속성은 이름을 짚어 거부하는지, 사람이 고친 plan 파일 재검증(`plan_problems`), 같은 날 plan 파일 덮어쓰기 방지 |
+| `tests/test_executor.py` | 새 상품은 DRAFT로 생성되는지, 다시 실행해도 게시된 상품이 초안으로 돌아가지 않는지, 이 세팅이 만들지 않은 상품·컬렉션(스토어 태그/태그 규칙 없음)은 건드리지 않는지, 충돌은 쓰기 전 사전 조회에서 전부 찾아 아무것도 쓰지 않고 끝나는지, 조회 필드가 스키마에 없으면 '없음'이 아니라 에러로 멈추는지, Shopify `userErrors`가 에러로 드러나는지, 문제 있는 plan은 쓰기 전에 전체 거부되는지, 첫 실패에서 멈추고 나머지를 skipped로 기록하는지, audit 로그 |
+| `tests/test_setup_store.py` | `apply`가 `apply`를 직접 입력하지 않으면 아무것도 쓰지 않는지, 거부될 plan은 승인 질문 전에 거부되는지, `apply`가 `ANTHROPIC_API_KEY`와 crewai 없이 도는지, 같은 날 `plan` 재실행이 모델 호출 전에 막히는지, brief 오류·계획 실패 메시지, 모델에게 주는 프롬프트에 가격이 들어가지 않는지 |
+
 ---
 
 ## 자동 vs 수동 테스트 역할 분담
