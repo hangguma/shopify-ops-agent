@@ -82,24 +82,43 @@ python setup_store.py apply outputs/store_plan_<date>.json  # no model, writes t
 2. **Plan**: the planner agent writes only the copy (description, product
    type, tags). `store_plan.py` merges it with the brief's facts, reduces the
    HTML to a small allowlist, and marks a product or the collection
-   `needs_review` if copy is missing, was cut off, or uses a medical-sounding
-   word (cure, heal, treat, prevent, acne, clinically proven, ...) in any
-   model-written field. The result is saved as
+   `needs_review` if copy is missing, was cut off, or makes a medical claim
+   in any model-written field (see "Claim wording" below). The result is
+   saved as
    `outputs/store_plan_<date>.json` and `.md`. `plan` will not replace an
    existing plan file for the same day unless you pass `--overwrite`.
 3. **Approval**: read the `.md`, edit the `.json` if you want changes. The
-   edited file is checked again with the same rules: HTML outside the
-   allowlist, a claim word, a bad handle, a bad price, or a product that has
-   lost the store tag all stop `apply` before it asks you anything. A claim
-   word is cleared by rewording the copy, not by setting `needs_review` to
-   false. When the plan is clean, `apply` prints it and writes only after you
-   type `apply`. There is no flag to skip this.
-4. **Apply** (`executor.py`, code, not an agent): each product is looked up
-   by its handle, then created as a **draft** or updated. Then a collection
-   is created that includes everything tagged with the brief's `store_tag`.
-   The collection is unpublished. Every step is appended to
-   `outputs/setup_audit_<date>.jsonl`. `apply` does not call the model and
-   does not need `ANTHROPIC_API_KEY`.
+   edited file is checked again with the same rules: a tag or attribute
+   outside the allowlist, a medical claim, a bad handle, a bad price, or a
+   product that has lost the store tag all stop `apply` before it asks you
+   anything, and the message names what was found (for example
+   "uses attribute onclick on <p>"). Spelling that changes nothing visible
+   (`<br/>`, `<P>`, `&nbsp;`, `&rsquo;`) is accepted and normalised when
+   written. When the plan is clean, `apply` prints it and writes only after
+   you type `apply`. There is no flag to skip this.
+4. **Apply** (`executor.py`, code, not an agent): first a read-only check
+   looks up every product handle and the collection handle. If any of them
+   belongs to something this setup did not make, the run ends there with
+   **nothing written**. Otherwise each product is created as a **draft** or
+   updated, then a collection is created that includes everything tagged
+   with the brief's `store_tag`. The collection is unpublished. Every step
+   is appended to `outputs/setup_audit_<date>.jsonl`. `apply` does not call
+   the model and does not need `ANTHROPIC_API_KEY`.
+
+Claim wording, in two strengths:
+
+- **Blocks apply**: wording that makes a cosmetic sound like a drug: cure,
+  heal, FDA, prescription, clinically proven, eczema, rosacea, psoriasis,
+  "acne treatment", and treat / prevent / fight / clear aimed at acne,
+  breakouts, pimples or blemishes. It is cleared by rewording the copy;
+  setting `needs_review` to false does nothing, because the check runs on
+  the text.
+- **Warns only**: "treat", "prevent" and "acne" on their own, which are
+  common in ordinary copy ("helps prevent moisture loss", "a treat for tired
+  skin", "for acne-prone skin"). These are listed under "Wording to check"
+  in the plan and do not block.
+
+This is a word filter, not legal review. It catches the obvious cases.
 
 What running `apply` again does:
 
@@ -109,12 +128,14 @@ What running `apply` again does:
   set back to the plan, so changes made to those in the Shopify admin are
   lost.
 - A product with the same handle that does **not** carry `store_tag` was not
-  made by this setup. It is never written; the run stops with an error.
+  made by this setup. It is never written.
 - An existing collection is accepted, and left as it is, only if its single
-  rule is "tag equals `store_tag`". Any other collection with that handle
-  stops the run, because the new products would not be in it.
-- The run stops at the first error. Steps already marked `ok` in the audit
-  log were written.
+  rule is "tag equals `store_tag`". Any other collection with that handle is
+  a conflict, because the new products would not be in it.
+- Conflicts are found by the read-only check before the first write, so a
+  conflict on any product or on the collection means nothing is written.
+- If a write itself fails (Shopify rejects it), the run stops there. Steps
+  already marked `ok` in the audit log were written.
 
 Before the first `apply`, add the `write_products` scope to the app (Dev
 Dashboard → Versions → Release) and approve the update on the store.
@@ -122,7 +143,10 @@ Dashboard → Versions → Release) and approve the update on the store.
 Limits for now: one variant per product, no images, no inventory quantities,
 and a set is a plain product (not a Shopify bundle). The collection mutation
 uses the `ruleSet` form, which API version 2026-07 deprecates in favour of
-`sources`; migrate when `SHOPIFY_API_VERSION` is raised.
+`sources`; migrate when `SHOPIFY_API_VERSION` is raised. The lookups use
+`productByHandle` and `collectionByHandle`, which are deprecated in favour
+of `productByIdentifier` and `collectionByIdentifier` but still in the
+schema (checked against the 2026-10 reference).
 
 New files: `store_brief.yaml`, `store_plan.py`, `executor.py`,
 `setup_store.py`, `agents/planner.py`, `tools/shopify_client.py` (auth and

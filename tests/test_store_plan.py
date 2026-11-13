@@ -14,11 +14,13 @@ from models.schemas import PlannedCopy, PlannerOutput, StoreBrief
 from store_plan import (
     build_plan,
     clean_html,
+    find_caution,
     find_claim,
     load_brief,
     load_plan,
     normalize_tags,
     plan_problems,
+    plan_warnings,
     render_markdown,
     sanitize_html,
     save_plan,
@@ -128,24 +130,43 @@ def test_sanitize_escapes_text_and_handles_empty():
 
 
 def test_void_embed_does_not_swallow_the_rest_of_the_description():
-    out, truncated = clean_html("<p>Intro.</p><embed src=x><ul><li>Feature</li></ul>")
-    assert out == "<p>Intro.</p><ul><li>Feature</li></ul>"
-    assert not truncated
+    cleaned = clean_html("<p>Intro.</p><embed src=x><ul><li>Feature</li></ul>")
+    assert cleaned.html == "<p>Intro.</p><ul><li>Feature</li></ul>"
+    assert not cleaned.truncated
+    assert cleaned.dropped == ["<embed>"]
 
 
 def test_unclosed_script_is_reported_as_truncated():
-    out, truncated = clean_html("<p>Intro.</p><script>var x = 1;<p>Lost text</p>")
-    assert out == "<p>Intro.</p>"
-    assert truncated
+    cleaned = clean_html("<p>Intro.</p><script>var x = 1;<p>Lost text</p>")
+    assert cleaned.html == "<p>Intro.</p>"
+    assert cleaned.truncated
+
+
+@pytest.mark.parametrize("edit", ["<p>Line one<br/>two</p>", "<p>A&nbsp;B</p>", "<p>It&rsquo;s nice</p>", "<P>Caps</P>"])
+def test_harmless_spelling_differences_are_not_reported_as_dropped(edit):
+    assert clean_html(edit).dropped == []
+
+
+def test_dropped_names_what_was_removed():
+    cleaned = clean_html('<p onclick="x()">Hi</p><a href="http://x">link</a><!-- note -->')
+    assert cleaned.dropped == ["attribute onclick on <p>", "<a>", "an HTML comment"]
 
 
 @pytest.mark.parametrize("text", [
-    "Helps treat acne.", "Prevents breakouts.", "Great for acne-prone skin.",
+    "Helps treat acne.", "Prevents breakouts.", "Fights stubborn pimples", "An acne treatment you can trust",
     "clinically <strong>proven</strong> results", "Clinically-proven glow", "clinically\n  proven",
     "Heals overnight", "FDA approved",
 ])
-def test_claim_words_are_found(text):
+def test_medical_claims_block(text):
     assert find_claim(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Helps prevent moisture loss", "A gentle treat for tired skin", "Suitable for acne-prone skin",
+])
+def test_common_cosmetic_wording_warns_but_does_not_block(text):
+    assert find_claim(text) is None
+    assert find_caution(text)
 
 
 @pytest.mark.parametrize("text", [
@@ -154,6 +175,7 @@ def test_claim_words_are_found(text):
 ])
 def test_ordinary_cosmetic_copy_is_not_flagged(text):
     assert find_claim(text) is None
+    assert find_caution(text) is None
 
 
 def test_normalize_tags_puts_required_first_and_dedupes():
@@ -222,7 +244,7 @@ def test_truncated_description_is_marked_for_review():
 
 def test_claim_in_tags_or_product_type_marks_product_for_review():
     copy = copy_for("oil", "balm", "set")
-    copy.products[0].tags = ["glow", "acne care"]
+    copy.products[0].tags = ["glow", "eczema relief"]
     copy.products[1].product_type = "Eczema Cream"
     plan = build_plan(BRIEF, copy)
 
@@ -258,7 +280,33 @@ def test_needs_review_flag_is_a_problem():
 def test_edited_html_is_checked_again():
     plan = good_plan()
     plan.products[0].description_html = '<p onclick="x()">Hi</p><script>alert(1)</script>'
-    assert any("oil: description contains HTML that is not allowed" in p for p in plan_problems(plan))
+    assert any("oil: description uses attribute onclick on <p>, which is not allowed" in p
+               for p in plan_problems(plan))
+
+
+@pytest.mark.parametrize("edit", ["<p>Line one<br/>two</p>", "<p>A&nbsp;B</p>", "<p>It&rsquo;s nice</p>", "<P>Caps</P>"])
+def test_harmless_hand_edits_are_accepted(edit):
+    plan = good_plan()
+    plan.products[0].description_html = edit
+    assert plan_problems(plan) == []
+
+
+def test_warning_wording_does_not_block_and_is_listed():
+    plan = good_plan()
+    plan.products[0].description_html = "<p>Helps prevent moisture loss. Suitable for acne-prone skin.</p>"
+    plan.collection.description_html = "<p>A gentle treat for tired skin.</p>"
+
+    assert plan_problems(plan) == []
+    warnings = plan_warnings(plan)
+    assert any(w.startswith("oil: description uses 'prevent'") for w in warnings)
+    assert any(w.startswith("collection: description uses 'treat'") for w in warnings)
+    assert "## Wording to check (does not block apply)" in render_markdown(plan)
+
+
+def test_clean_plan_has_no_warnings_section():
+    plan = good_plan()
+    assert plan_warnings(plan) == []
+    assert "Wording to check" not in render_markdown(plan)
 
 
 def test_claim_cannot_be_cleared_by_flipping_the_flag():
@@ -266,7 +314,7 @@ def test_claim_cannot_be_cleared_by_flipping_the_flag():
     for p in plan.products:  # a person sets needs_review to false without rewording
         p.needs_review = False
     problems = plan_problems(plan)
-    assert any("oil: description contains a medical-sounding claim" in p for p in problems)
+    assert any("oil: description makes a medical claim" in p for p in problems)
 
 
 def test_edited_handle_tags_and_duplicates_are_caught():

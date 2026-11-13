@@ -14,12 +14,10 @@ Why this design?
   functions, not CrewAI tools: no agent is ever handed a write tool.
 """
 
-import requests  # noqa: F401 - tests patch tools.shopify_tool.requests.post
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 
-# Re-exported so existing callers and tests can keep using this module's names.
-from tools.shopify_client import _get_access_token, _graphql_request, _token_cache  # noqa: F401
+from tools.shopify_client import _graphql_request
 
 PRODUCTS_QUERY = """
 query ($first: Int!) {

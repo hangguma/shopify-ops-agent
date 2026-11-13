@@ -208,3 +208,14 @@ def test_planning_task_lists_every_key_and_no_prices():
     assert "key: oil" in task.description and "key: set" in task.description
     assert "세트 구성(key): oil" in task.description
     assert "20.55" not in task.description and "40.55" not in task.description
+
+
+def test_apply_says_nothing_was_written_when_the_preflight_check_fails(plan_file, caplog):
+    entries = [
+        {"action": "product", "handle": "oil", "status": "skipped", "phase": "preflight", "detail": "not written"},
+        {"action": "collection", "handle": "glow", "status": "error", "phase": "preflight", "detail": "already exists"},
+    ]
+    with patch("builtins.input", return_value="apply"), \
+         patch.object(setup_store, "apply_plan", return_value=entries), caplog.at_level(logging.ERROR):
+        assert setup_store.main(["apply", plan_file]) == 1
+    assert "Nothing was written" in caplog.text

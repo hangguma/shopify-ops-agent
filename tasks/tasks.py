@@ -43,7 +43,7 @@ def build_planning_task(agent: Agent, brief: StoreBrief) -> Task:
             f"임상 결과처럼 주어지지 않은 사실을 지어내지 않는다.\n"
             f"4) 화장품 문구이므로 치료·예방·의학적 효능을 주장하지 않는다. "
             f"cure, heal, treat, prevent, acne, clinically proven 같은 단어는 쓰지 않는다 "
-            f"(쓰면 그 상품은 사람 검토로 넘어간다). 사용감과 겉보기 효과만 표현한다.\n"
+            f"(의학적 주장으로 읽히면 그 상품은 사람 검토로 넘어간다). 사용감과 겉보기 효과만 표현한다.\n"
             f"5) 가격, 상품명, 브랜드는 시스템이 채우므로 문구에 가격을 적지 않는다.\n"
             f"6) product_type은 짧은 카테고리명(예: 'Cleansing Oil'), tags는 소문자 검색어 3~6개.\n"
             f"7) 세트 상품은 구성품을 사용 순서대로 소개한다.\n"

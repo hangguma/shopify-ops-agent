@@ -7,14 +7,18 @@ Why this design?
   the model, so a hallucinated price cannot reach the store.
 - Everything the model wrote is checked before a person sees it: HTML is
   reduced to a small allowlist, tags are normalised, and copy that makes a
-  medical-sounding claim is kept but marked needs_review.
+  medical claim is kept but marked needs_review.
 - The plan is a JSON file on disk. That file - not the model's output - is
   what gets approved and applied, and a person may edit it. So the same
   checks run again on the file (plan_problems) before anything is written:
-  an edit cannot bring back unsafe HTML, a claim word, a bad handle or a
-  product that has lost the store tag.
-- A claim word is cleared by rewording the copy, not by flipping
-  needs_review: the check runs on the text itself every time.
+  an edit cannot bring back a disallowed tag, a blocked claim, a bad handle
+  or a product that has lost the store tag.
+- Claims come in two strengths. Wording that makes a product sound like a
+  drug ("heals", "treats acne", "clinically proven") blocks apply and is
+  cleared only by rewording - the check runs on the text itself, so
+  flipping needs_review does nothing. Words that are usually fine in
+  cosmetic copy but worth a look ("prevent", "treat", "acne" on their own)
+  are shown as warnings (plan_warnings) and do not block.
 """
 
 import json
@@ -23,6 +27,7 @@ import re
 from datetime import date
 from html import escape, unescape
 from html.parser import HTMLParser
+from typing import NamedTuple
 
 import yaml
 
@@ -43,17 +48,33 @@ _ALLOWED_TAGS = {"p", "ul", "ol", "li", "strong", "em", "b", "i", "br", "h3", "h
 _DROP_WITH_CONTENT = {"script", "style", "iframe", "object"}
 _MAX_TAGS = 8
 
-# Cosmetics copy must not claim to treat, cure or prevent anything. Applied
-# to text with tags removed and whitespace collapsed.
-_CLAIM_WORDS = re.compile(
+# Both patterns run on visible text: tags removed, whitespace collapsed.
+_CONDITION = r"(?:acne|breakouts?|pimples?|blemish(?:es)?)"
+
+# Blocks apply. Disease/drug language, and treat/prevent aimed at a condition.
+_CLAIM_BLOCK = re.compile(
     r"\b("
     r"cures?|cured|curing|heals?|healed|healing|"
-    r"treats?|treated|treating|prevents?|prevented|preventing|"
-    r"acne|eczema|rosacea|psoriasis|fda|prescription|"
-    r"clinically[\s-]+proven"
+    r"eczema|rosacea|psoriasis|fda|prescription|"
+    r"clinically[\s-]+proven|"
+    r"(?:treat|prevent|fight|clear)(?:s|ed|ing)?\s+(?:\w+\s+){0,2}?" + _CONDITION + r"|"
+    r"acne[\s-]+(?:treatment|medication|medicine)"
     r")\b",
     re.IGNORECASE,
 )
+
+# Warns only. Common in ordinary cosmetic copy ("helps prevent moisture
+# loss", "a treat for tired skin", "for acne-prone skin").
+_CLAIM_WARN = re.compile(
+    r"\b(treats?|treated|treating|prevents?|prevented|preventing|acne)\b",
+    re.IGNORECASE,
+)
+
+
+class Cleaned(NamedTuple):
+    html: str
+    truncated: bool       # an unclosed script/style block swallowed the rest
+    dropped: list[str]    # what cleaning removed, e.g. ["<a>", "attribute onclick on <p>"]
 
 
 class _Sanitizer(HTMLParser):
@@ -62,13 +83,20 @@ class _Sanitizer(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.out: list[str] = []
+        self.dropped: list[str] = []
         self.skip_depth = 0
 
     def handle_starttag(self, tag, attrs):
         if tag in _DROP_WITH_CONTENT:
             self.skip_depth += 1
-        elif not self.skip_depth and tag in _ALLOWED_TAGS:
+            self.dropped.append(f"<{tag}>")
+        elif self.skip_depth:
+            return
+        elif tag in _ALLOWED_TAGS:
+            self.dropped.extend(f"attribute {name} on <{tag}>" for name, _ in attrs)
             self.out.append(f"<{tag}>")
+        else:
+            self.dropped.append(f"<{tag}>")
 
     def handle_endtag(self, tag):
         if tag in _DROP_WITH_CONTENT:
@@ -80,21 +108,33 @@ class _Sanitizer(HTMLParser):
         if not self.skip_depth:
             self.out.append(escape(data, quote=False))
 
+    def handle_comment(self, data):
+        self.dropped.append("an HTML comment")
 
-def clean_html(html: str) -> tuple[str, bool]:
-    """Return (cleaned html, truncated).
+    def handle_decl(self, decl):
+        self.dropped.append("a <!...> declaration")
 
-    `truncated` is True when a script/style/iframe/object block was never
-    closed, which means everything after it was dropped.
+    def handle_pi(self, data):
+        self.dropped.append("a <?...> instruction")
+
+    def unknown_decl(self, data):
+        self.dropped.append("a <![...]> section")
+
+
+def clean_html(html: str) -> Cleaned:
+    """Reduce HTML to the allowlist and report what was removed.
+
+    Spelling differences that change nothing visible (`<br/>`, `<P>`,
+    `&nbsp;`, `&rsquo;`) are normalised and are not reported as dropped.
     """
     parser = _Sanitizer()
     parser.feed(html or "")
     parser.close()
-    return "".join(parser.out).strip(), parser.skip_depth > 0
+    return Cleaned("".join(parser.out).strip(), parser.skip_depth > 0, parser.dropped)
 
 
 def sanitize_html(html: str) -> str:
-    return clean_html(html)[0]
+    return clean_html(html).html
 
 
 def _text_only(html: str) -> str:
@@ -103,9 +143,17 @@ def _text_only(html: str) -> str:
 
 
 def find_claim(*texts: str) -> str | None:
-    """Return the first medical-sounding word found in any of the texts."""
+    """First wording that blocks apply (drug-like claim), or None."""
     for text in texts:
-        if (m := _CLAIM_WORDS.search(_text_only(text))):
+        if (m := _CLAIM_BLOCK.search(_text_only(text))):
+            return m.group(0)
+    return None
+
+
+def find_caution(*texts: str) -> str | None:
+    """First word that deserves a look but does not block, or None."""
+    for text in texts:
+        if (m := _CLAIM_WARN.search(_text_only(text))):
             return m.group(0)
     return None
 
@@ -120,18 +168,31 @@ def normalize_tags(tags: list[str], always: list[str]) -> list[str]:
     return seen[: max(_MAX_TAGS, len(always))]
 
 
+def _html_problem(html: str) -> str:
+    """Why this HTML cannot be written as it stands, or ''."""
+    cleaned = clean_html(html)
+    if cleaned.dropped:
+        allowed = ", ".join(sorted(_ALLOWED_TAGS))
+        return (f"description uses {cleaned.dropped[0]}, which is not allowed "
+                f"(allowed tags: {allowed}; no attributes)")
+    if cleaned.truncated:
+        return "description has an unclosed script/style block; the text after it was dropped"
+    return ""
+
+
+def _copy_fields(description_html: str, product_type: str, tags: list[str]):
+    return (("description", description_html), ("product type", product_type), ("tags", " | ".join(tags)))
+
+
 def _copy_problem(description_html: str, product_type: str, tags: list[str]) -> str:
     """Why this copy cannot be applied as it stands, or '' if it can."""
-    cleaned, truncated = clean_html(description_html)
-    if cleaned != (description_html or "").strip():
-        return "description contains HTML that is not allowed (only simple tags, no attributes)"
-    if truncated:
-        return "description has an unclosed script/style block; the text after it was dropped"
-    if not _text_only(cleaned):
+    if (problem := _html_problem(description_html)):
+        return problem
+    if not _text_only(description_html):
         return "description is empty"
-    for label, text in (("description", cleaned), ("product type", product_type), ("tags", " | ".join(tags))):
-        if (word := find_claim(text)):
-            return f"{label} contains a medical-sounding claim: {word!r}"
+    for label, text in _copy_fields(description_html, product_type, tags):
+        if (wording := find_claim(text)):
+            return f"{label} makes a medical claim: {wording!r}. Reword it."
     return ""
 
 
@@ -150,16 +211,16 @@ def build_plan(brief: StoreBrief, copy: PlannerOutput, today: str | None = None)
     for p in brief.products:
         c = by_key.get(p.key)
         always = [brief.store_tag] + (["bundle"] if p.bundle_of else [])
-        description, truncated = clean_html(c.description_html) if c else ("", False)
+        cleaned = clean_html(c.description_html) if c else Cleaned("", False, [])
         product_type = " ".join(c.product_type.split())[:60] if c else ""
         tags = normalize_tags(c.tags if c else [], always)
 
         if c is None:
             reason = "the model returned no copy for this product"
-        elif truncated:
+        elif cleaned.truncated:
             reason = "description had an unclosed script/style block; the text after it was dropped"
         else:
-            reason = _copy_problem(description, product_type, [t for t in tags if t not in always])
+            reason = _copy_problem(cleaned.html, product_type, [t for t in tags if t not in always])
 
         products.append(PlannedProduct(
             key=p.key,
@@ -168,18 +229,18 @@ def build_plan(brief: StoreBrief, copy: PlannerOutput, today: str | None = None)
             vendor=p.vendor,
             price=p.price,
             product_type=product_type,
-            description_html=description,
+            description_html=cleaned.html,
             tags=tags,
             needs_review=bool(reason),
             review_reason=reason,
         ))
 
-    collection_description, truncated = clean_html(copy.collection_description_html)
+    cleaned = clean_html(copy.collection_description_html)
     collection_reason = ""
-    if truncated:
+    if cleaned.truncated:
         collection_reason = "description had an unclosed script/style block; the text after it was dropped"
-    elif (word := find_claim(collection_description)):
-        collection_reason = f"description contains a medical-sounding claim: {word!r}"
+    elif (wording := find_claim(cleaned.html)):
+        collection_reason = f"description makes a medical claim: {wording!r}. Reword it."
 
     return StorePlan(
         date=today or date.today().isoformat(),
@@ -187,13 +248,17 @@ def build_plan(brief: StoreBrief, copy: PlannerOutput, today: str | None = None)
         collection=PlannedCollection(
             handle=brief.collection_key,
             title=brief.collection_title,
-            description_html=collection_description,
+            description_html=cleaned.html,
             tag=brief.store_tag,
             needs_review=bool(collection_reason),
             review_reason=collection_reason,
         ),
         products=products,
     )
+
+
+def _other_tags(p: PlannedProduct, store_tag: str) -> list[str]:
+    return [t for t in p.tags if t.casefold() != store_tag.casefold()]
 
 
 def plan_problems(plan: StorePlan) -> list[str]:
@@ -216,11 +281,10 @@ def plan_problems(plan: StorePlan) -> list[str]:
         problems.append(f"collection: handle {c.handle!r} must be lowercase letters, digits and hyphens")
     if c.tag != tag:
         problems.append(f"collection: tag {c.tag!r} must equal store_tag {tag!r}")
-    cleaned, truncated = clean_html(c.description_html)
-    if cleaned != (c.description_html or "").strip() or truncated:
-        problems.append("collection: description contains HTML that is not allowed")
-    elif (word := find_claim(cleaned)):
-        problems.append(f"collection: description contains a medical-sounding claim: {word!r}")
+    if (problem := _html_problem(c.description_html)):
+        problems.append(f"collection: {problem}")
+    elif (wording := find_claim(c.description_html)):
+        problems.append(f"collection: description makes a medical claim: {wording!r}. Reword it.")
 
     handles = [p.handle for p in plan.products]
     for dupe in sorted({h for h in handles if handles.count(h) > 1}):
@@ -235,11 +299,27 @@ def plan_problems(plan: StorePlan) -> list[str]:
             problems.append(f"{p.key}: tags must include {tag!r}, or the product is left out of the collection")
         if not p.title.strip() or not p.vendor.strip():
             problems.append(f"{p.key}: title and vendor must not be empty")
-        other_tags = [t for t in p.tags if t.casefold() != tag.casefold()]
-        if (problem := _copy_problem(p.description_html, p.product_type, other_tags)):
+        if (problem := _copy_problem(p.description_html, p.product_type, _other_tags(p, tag))):
             problems.append(f"{p.key}: {problem}")
 
     return problems
+
+
+def plan_warnings(plan: StorePlan) -> list[str]:
+    """Wording worth a second look. Shown to the person; never blocks apply."""
+    warnings: list[str] = []
+
+    def check(owner: str, label: str, text: str) -> None:
+        if not find_claim(text) and (word := find_caution(text)):
+            warnings.append(
+                f"{owner}: {label} uses {word!r} - fine for a cosmetic effect, not for a skin condition"
+            )
+
+    check("collection", "description", plan.collection.description_html)
+    for p in plan.products:
+        for label, text in _copy_fields(p.description_html, p.product_type, _other_tags(p, plan.store_tag)):
+            check(p.key, label, text)
+    return warnings
 
 
 def render_markdown(plan: StorePlan) -> str:
@@ -270,6 +350,11 @@ def render_markdown(plan: StorePlan) -> str:
         if p.needs_review:
             lines.append(f"- review reason: {p.review_reason}")
         lines += ["", p.description_html or "_(no description)_"]
+
+    warnings = plan_warnings(plan)
+    if warnings:
+        lines += ["", "## Wording to check (does not block apply)"]
+        lines += [f"- {w}" for w in warnings]
     return "\n".join(lines) + "\n"
 
 

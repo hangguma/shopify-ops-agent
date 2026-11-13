@@ -118,7 +118,10 @@ def cmd_apply(plan_path: str) -> int:
     log.info("Audit log -> %s", audit_path_for(plan))
 
     if any(e["status"] != "ok" for e in entries):
-        log.error("Setup did not finish. Steps marked ok were written; fix the error above and run apply again.")
+        if any(e["status"] == "ok" for e in entries):
+            log.error("Setup did not finish. Steps marked ok were written; fix the error above and run apply again.")
+        else:
+            log.error("Nothing was written: the check before writing found the problem above. Fix it and run apply again.")
         return 1
     log.info("Setup complete. Review the products in the Shopify admin.")
     return 0

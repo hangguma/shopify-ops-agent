@@ -15,21 +15,21 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import tools.shopify_tool as shopify_tool
+import tools.shopify_client as shopify_client
 from tools.shopify_tool import ShopifyOrdersTool, ShopifyProductsTool
 
 
 @pytest.fixture(autouse=True)
 def _seed_token_cache():
-    shopify_tool._token_cache.update(
+    shopify_client._token_cache.update(
         {"access_token": "test-token", "expires_at": time.time() + 3600}
     )
     yield
-    shopify_tool._token_cache.update({"access_token": None, "expires_at": 0.0})
+    shopify_client._token_cache.update({"access_token": None, "expires_at": 0.0})
 
 
 def _clear_token_cache():
-    shopify_tool._token_cache.update({"access_token": None, "expires_at": 0.0})
+    shopify_client._token_cache.update({"access_token": None, "expires_at": 0.0})
 
 
 def _mock_response(json_body: dict) -> MagicMock:
@@ -84,7 +84,7 @@ def _fake_orders_body(n: int) -> dict:
 
 # -- ShopifyProductsTool -----------------------------------------------
 
-@patch("tools.shopify_tool.requests.post")
+@patch("tools.shopify_client.requests.post")
 def test_products_tool_formats_catalog(mock_post):
     mock_post.return_value = _mock_response(_fake_products_body(2))
 
@@ -96,7 +96,7 @@ def test_products_tool_formats_catalog(mock_post):
     assert "qty: 3" in out
 
 
-@patch("tools.shopify_tool.requests.post")
+@patch("tools.shopify_client.requests.post")
 def test_products_tool_empty_catalog(mock_post):
     mock_post.return_value = _mock_response({"data": {"products": {"edges": []}}})
 
@@ -105,7 +105,7 @@ def test_products_tool_empty_catalog(mock_post):
     assert out == "No products found in this store."
 
 
-@patch("tools.shopify_tool.requests.post")
+@patch("tools.shopify_client.requests.post")
 def test_products_tool_passes_limit_as_graphql_variable(mock_post):
     mock_post.return_value = _mock_response(_fake_products_body(1))
 
@@ -117,7 +117,7 @@ def test_products_tool_passes_limit_as_graphql_variable(mock_post):
 
 # -- ShopifyOrdersTool ---------------------------------------------------
 
-@patch("tools.shopify_tool.requests.post")
+@patch("tools.shopify_client.requests.post")
 def test_orders_tool_formats_orders(mock_post):
     mock_post.return_value = _mock_response(_fake_orders_body(1))
 
@@ -128,7 +128,7 @@ def test_orders_tool_formats_orders(mock_post):
     assert "Widget x2" in out
 
 
-@patch("tools.shopify_tool.requests.post")
+@patch("tools.shopify_client.requests.post")
 def test_orders_tool_empty_orders(mock_post):
     mock_post.return_value = _mock_response({"data": {"orders": {"edges": []}}})
 
@@ -139,14 +139,14 @@ def test_orders_tool_empty_orders(mock_post):
 
 # -- Token exchange (_get_access_token) ----------------------------------
 
-@patch("tools.shopify_tool.requests.post")
+@patch("tools.shopify_client.requests.post")
 def test_token_exchanged_via_client_credentials(mock_post):
     _clear_token_cache()
     mock_post.return_value = _mock_response(
         {"access_token": "fresh-token", "expires_in": 86400}
     )
 
-    token = shopify_tool._get_access_token()
+    token = shopify_client._get_access_token()
 
     assert token == "fresh-token"
     sent = mock_post.call_args.kwargs["data"]
@@ -154,46 +154,46 @@ def test_token_exchanged_via_client_credentials(mock_post):
     assert "/admin/oauth/access_token" in mock_post.call_args.args[0]
 
 
-@patch("tools.shopify_tool.requests.post")
+@patch("tools.shopify_client.requests.post")
 def test_token_cached_until_expiry(mock_post):
     _clear_token_cache()
     mock_post.return_value = _mock_response(
         {"access_token": "fresh-token", "expires_in": 86400}
     )
 
-    shopify_tool._get_access_token()
-    shopify_tool._get_access_token()
+    shopify_client._get_access_token()
+    shopify_client._get_access_token()
 
     assert mock_post.call_count == 1  # second call served from cache
 
 
-@patch("tools.shopify_tool.requests.post")
+@patch("tools.shopify_client.requests.post")
 def test_expired_token_is_reexchanged(mock_post):
     mock_post.return_value = _mock_response(
         {"access_token": "fresh-token", "expires_in": 86400}
     )
-    shopify_tool._token_cache.update(
+    shopify_client._token_cache.update(
         {"access_token": "stale-token", "expires_at": time.time() - 1}
     )
 
-    token = shopify_tool._get_access_token()
+    token = shopify_client._get_access_token()
 
     assert token == "fresh-token"
     assert mock_post.call_count == 1
 
 
-@patch("tools.shopify_tool.requests.post")
+@patch("tools.shopify_client.requests.post")
 def test_token_exchange_failure_raises(mock_post):
     _clear_token_cache()
     mock_post.return_value = _mock_response({"error": "invalid_client"})
 
     with pytest.raises(RuntimeError, match="token exchange failed"):
-        shopify_tool._get_access_token()
+        shopify_client._get_access_token()
 
 
 # -- Shared error handling (_graphql_request) ----------------------------
 
-@patch("tools.shopify_tool.requests.post")
+@patch("tools.shopify_client.requests.post")
 def test_graphql_errors_raise_runtime_error(mock_post):
     mock_post.return_value = _mock_response({"errors": [{"message": "Invalid API key"}]})
 
@@ -201,7 +201,7 @@ def test_graphql_errors_raise_runtime_error(mock_post):
         ShopifyProductsTool()._run(limit=20)
 
 
-@patch("tools.shopify_tool.requests.post")
+@patch("tools.shopify_client.requests.post")
 def test_http_error_propagates(mock_post):
     resp = MagicMock()
     resp.raise_for_status.side_effect = Exception("503 Service Unavailable")
